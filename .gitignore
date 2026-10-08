@@ -41,3 +41,7 @@ desktop.ini
 *serviceAccount*.json
 *service-account*.json
 sa-key*.json
+
+# 測試用的虛構制度文件（不是真實公司的制度），要進版控
+!tools/fixtures/*.docx
+!tools/fixtures/*.pdf

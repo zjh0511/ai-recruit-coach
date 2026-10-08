@@ -3,12 +3,13 @@
 // 帳號與訓練紀錄透過 Firebase 同步（和 AI業務教練共用同一個專案，資料放在 /recruit/<uid>）。
 //
 // 四大功能：招募對象痛點分析、招募邀約電訪演練、招募面談技巧演練、問問招募教練。
-import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=6';
-import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=6';
-import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=6';
-import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=6';
-import * as acct from './engine/account.js?v=6';
-import * as own from './engine/owner.js?v=6';
+import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=8';
+import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=8';
+import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=8';
+import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=8';
+import * as acct from './engine/account.js?v=8';
+import * as own from './engine/owner.js?v=8';
+import { setOwner } from './engine/store.js?v=8';
 
 const $ = s => document.querySelector(s);
 const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
@@ -31,9 +32,10 @@ const S = {
   lastCandidate: null,   // 最近一次的招募對象資料卡，可以直接接去下一個功能
   lastFb: null,
   chatHistory: [],
+  docIds: [],            // 招募制度演練勾選的文件（最多 5 份）
 };
 
-const FN_TITLE = { pain: '招募對象痛點分析', call: '招募邀約電訪演練', meet: '招募面談技巧演練', chat: '問問招募教練' };
+const FN_TITLE = { pain: '招募對象痛點分析', call: '招募邀約電訪演練', meet: '招募面談技巧演練', system: '公司招募制度演練', chat: '問問招募教練' };
 
 // ── 畫面切換 ────────────────────────────────────────────────
 function show(name) {
@@ -42,6 +44,7 @@ function show(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + name));
   if (name === 'history') renderHistory();
   if (name === 'models') renderModels();
+  if (name === 'docs') renderDocs();
   syncInstallBtn();                                    // 三個畫面都有「加到主畫面」
   if (name === 'home') {
     // 強制登入的把關點。帳號在使用途中失效（管理者停用、token 被撤銷）時，
@@ -289,6 +292,7 @@ document.querySelectorAll('[data-fn]').forEach(b => b.onclick = () => openFn(b.d
 function openFn(fn) {
   S.fn = fn;
   if (fn === 'chat') { renderChat(); return show('chat'); }
+  if (fn === 'system') return openDocs();
   openIntake(fn);
 }
 
@@ -298,7 +302,7 @@ function openIntake(fn, keep = true) {
   S.fn = fn;
   $('#i-title').textContent = FN_TITLE[fn];
   $('#i-diff-wrap').hidden = fn === 'pain';
-  $('#i-ctx-label').firstChild.nodeValue = fn === 'meet' ? '你和對方的關係（這次面談是怎麼約到的）' : '你和對方的關係';
+  $('#i-ctx-label').firstChild.nodeValue = fn === 'call' || fn === 'pain' ? '你和對方的關係' : '你和對方的關係（這次見面是怎麼約到的）';
   $('#btn-go').textContent = fn === 'pain' ? '分析痛點' : '建立招募對象';
   const p = prefs();                       // 沿用上次的難度與情境，不用每次重選
   if (p.diff) setChip('#f-diff', p.diff);
@@ -361,7 +365,7 @@ $('#btn-go').onclick = async () => {
 
   busy('正在建立招募對象、準備示範話術稿…');
   try {
-    const d = await api('/session/start', { ...cand, mode: S.fn, difficulty: pick('#f-diff') });
+    const d = await api('/session/start', { ...cand, mode: S.fn, difficulty: pick('#f-diff'), docIds: S.fn === 'system' ? S.docIds : undefined });
     savePrefs({ diff: pick('#f-diff'), ctx: cand.context });
     S.sessionId = d.sessionId; S.persona = d.persona; S.totals = d.totals; S.ended = false;
     renderBrief(d);
@@ -413,40 +417,242 @@ $('#btn-pain2call').onclick = () => openIntake('call');
 $('#btn-pain2meet').onclick = () => openIntake('meet');
 
 // ── 演練前：示範話術稿 ──────────────────────────────────────
+// 示範話術稿的段落，照實際對話順序；['*'] 是拒絕／顧慮那一段
 const DEMO_STEPS = {
-  call: [['opening', '開場與交代來意'], ['invite', '邀約見面']],
-  meet: [['icebreak', '破冰'], ['situation_q', '了解現況'], ['motive_q', '引出動機'], ['opportunity', '介紹事業機會'], ['close', '邀約下一步']],
+  call: [['opening', '開場與交代來意'], ['invite', '邀約見面'], ['*', 'objection', '遇到拒絕時']],
+  meet: [['icebreak', '破冰'], ['situation_q', '了解現況'], ['motive_q', '引出動機'], ['opportunity', '介紹事業機會'],
+    ['*', 'concern', '遇到顧慮時'], ['close', '邀約下一步']],
+  system: [['opening', '開場'], ['income', '說明收入結構'], ['career', '說明晉升路徑'], ['support', '說明新人支持'],
+    ['challenge', '誠實說明考核與挑戰'], ['*', 'concern', '對方追問時'], ['close', '邀約下一步']],
 };
+// 演練畫面左上角、開始按鈕：一眼看得出現在練的是哪一個（R014）
+const MODE_TAG = { call: '📞 電訪', meet: '🤝 面談', system: '📋 制度' };
 
 function renderBrief(d) {
   const mode = S.fn;
   $('#b-title').textContent = FN_TITLE[mode];
-  $('#btn-start').textContent = mode === 'call' ? '📞 開始電訪演練' : '🤝 開始面談演練';
+  $('#btn-start').textContent = `${MODE_TAG[mode]}・開始演練`;
+  $('#b-learn').hidden = mode !== 'system';
   $('#b-name').textContent = d.persona.name;
   $('#b-summary').textContent = [d.persona.summary, d.contextLabel, '難度：' + d.persona.difficultyLabel].filter(Boolean).join('　·　');
   $('#b-obj').textContent = d.scenario?.objective || MODES[mode].objective;
   $('#b-goal').textContent = mode === 'call'
     ? '成功：約到見面。'
     : '成功：對方答應參加事業說明會或二次面談；最好的結果：願意去考照。'
-      + `對方心裡有 ${d.totals.concerns} 個顧慮、${d.totals.motives} 個想要的事，問對問題他才會說。`;
+      + (mode === 'system'
+        ? `對方會一直追問制度細節。這次要講到的重點：${(d.keyPoints || []).map((k, i) => `${i + 1}. ${k}`).join('　')}`
+        : `對方心裡有 ${d.totals.concerns} 個顧慮、${d.totals.motives} 個想要的事，問對問題他才會說。`);
 
   const box = $('#b-demo'); box.innerHTML = '';
   box.append(el('h4', null, '示範話術稿（參考用，不是標準答案）'));
   const demo = d.demo || {};
-  const steps = DEMO_STEPS[mode];
-  const objKey = mode === 'call' ? 'objection' : 'concern';
-  // 處理拒絕／顧慮放在邀約之前（面談）或最後（電訪），照實際對話順序
-  const order = mode === 'call' ? [...steps, [objKey]] : [...steps.slice(0, 4), [objKey], steps[4]];
-  for (const [k, t] of order) {
-    if (k === objKey) {
-      const o = demo[objKey];
-      if (!o) continue;
-      box.append(el('p', 'step-t', mode === 'call' ? '遇到拒絕時' : '遇到顧慮時'),
-        el('p', 'quote', '對方：' + (o.candidate || '')), el('p', null, '你：' + (o.you || '')));
-    } else if (demo[k]) box.append(el('p', 'step-t', t), el('p', null, demo[k]));
+  for (const [k, a, b] of DEMO_STEPS[mode]) {
+    if (k === '*') {
+      const o = demo[a];
+      if (o) box.append(el('p', 'step-t', b), el('p', 'quote', '對方：' + (o.candidate || '')), el('p', null, '你：' + (o.you || '')));
+    } else if (demo[k]) box.append(el('p', 'step-t', a), el('p', null, demo[k]));
   }
   $('#s-brief .scroll').scrollTop = 0;
 }
+
+// ── 第二版：公司招募制度文件 ─────────────────────────────────
+// 流程：勾選文件（最多 5 份）→【招募制度重點】→ 設定招募對象 → 示範話術稿（可回看重點）→ 演練 → 回饋
+const MAX_PICK = 5;
+const consented = () => my.get(K.docconsent) === '1';
+
+function openDocs() {
+  S.fn = 'system';
+  $('#d-consent').hidden = consented();
+  $('#d-agree').checked = false;
+  show('docs');                                   // show('docs') 會畫清單
+}
+
+// 清單可能同時被要求重畫好幾次（例如上傳完、切回這個畫面）：只畫最後一次，不然會出現重複的列
+let docsRender = 0;
+async function renderDocs() {
+  const tok = ++docsRender;
+  let docs = [];
+  try { docs = (await api('/doc/list')).docs; } catch (e) { if (e.auth) return logout(e.message); return toast(e.message); }
+  if (tok !== docsRender) return;
+  const b = $('#d-list'); b.innerHTML = '';
+  S.docIds = S.docIds.filter(id => docs.some(d => d.id === id));
+  if (!docs.length) b.append(el('p', 'upl', '還沒有制度文件，先上傳一份吧。'));
+  for (const d of docs) {
+    const on = S.docIds.includes(d.id);
+    const row = el('div', 'card sm pol' + (on ? ' on' : ''));
+    const head = el('label', 'inline pol-h');
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = on;
+    head.append(cb, el('b', null, d.title || d.name));
+    row.append(head, el('p', 'muted', [d.name, new Date(d.at).toLocaleDateString('zh-TW'), d.lesson ? '已有教練講解' : ''].filter(Boolean).join('　')));
+    cb.onchange = () => {
+      if (cb.checked) {
+        if (S.docIds.length >= MAX_PICK) { cb.checked = false; return toast(`一次最多選 ${MAX_PICK} 份`); }
+        S.docIds.push(d.id);
+      } else S.docIds = S.docIds.filter(x => x !== d.id);
+      renderDocs();
+    };
+    const del = el('button', 'del', '🗑');
+    del.onclick = async () => {
+      if (!confirm(`刪除「${d.title || d.name}」？這份文件的整理與教練講解也會一起刪除。`)) return;
+      await api('/doc/delete', { id: d.id }); S.docIds = S.docIds.filter(x => x !== d.id); renderDocs();
+    };
+    row.append(del);
+    b.append(row);
+  }
+  $('#d-next').disabled = !S.docIds.length;
+  $('#d-next').textContent = S.docIds.length ? `下一步：看制度重點（已選 ${S.docIds.length} 份）` : '先勾選至少一份制度文件';
+}
+
+$('#btn-upload').onclick = () => {
+  if (!consented()) {
+    if (!$('#d-agree').checked) { $('#d-consent').scrollIntoView({ block: 'start' }); return toast('請先閱讀上方的提醒並勾選確認', 4000); }
+    my.set(K.docconsent, '1');
+    $('#d-consent').hidden = true;
+  }
+  $('#f-file').click();
+};
+
+$('#f-file').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  if (f.size > 18 * 1024 * 1024) return toast('檔案超過 18MB，請壓縮或分成幾份上傳', 4000);
+  busy(`AI 正在研讀「${f.name}」並整理制度重點…\n文件較長時可能需要一兩分鐘`);
+  try {
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1]);
+      r.onerror = () => rej(new Error('檔案讀取失敗'));
+      r.readAsDataURL(f);
+    });
+    const d = await api('/doc/upload', { name: f.name, base64 });
+    if (S.docIds.length < MAX_PICK) S.docIds.push(d.id);           // 剛上傳的直接幫他勾起來
+    toast(d.warning ? `已整理「${d.title}」，但⚠️ ${d.warning}` : `已整理好「${d.title}」`, d.warning ? 8000 : 3000);
+  } catch (err) {
+    if (err.auth) return logout(err.message);
+    toast(err.message, 6000);
+  }
+  show('docs');
+};
+
+$('#d-next').onclick = () => openLearn('pick');
+
+// ── 招募制度重點頁 ──────────────────────────────────────────
+// 第一次一定會出現；看過之後按鈕變成「跳過，直接設定」。示範話術稿頁可以「回看」，看完回到示範話術稿。
+let learnFrom = 'pick', learnView = null;
+
+async function openLearn(from) {
+  learnFrom = from;
+  busy('正在載入制度重點…');
+  try { learnView = await api('/doc/lesson', { ids: S.docIds }); }
+  catch (e) { if (e.auth) return logout(e.message); toast(e.message); return show(from === 'review' ? 'brief' : 'docs'); }
+  $('#l-go').textContent = from === 'review' ? '回到示範話術稿' : learnView.seen ? '跳過，直接設定招募對象' : '看完了，設定招募對象';
+  renderLearn();
+  show('learn');
+}
+
+const notMissing = x => x && !/^文件未載明/.test(String(x).trim());
+
+function renderLearn() {
+  const v = learnView, b = $('#l-body');
+  b.innerHTML = '';
+  if (v.keyPoints?.length) {
+    const c = el('div', 'card key');
+    c.append(el('h4', null, '🎯 演練時要講到的重點'));
+    const ol = el('ol'); v.keyPoints.forEach(k => ol.append(el('li', null, k))); c.append(ol);
+    c.append(el('p', 'note', '演練結束後，教練回饋會逐點檢查你有沒有把這幾點講給對方聽。'));
+    b.append(c);
+  }
+  v.docs.forEach((d, i) => {
+    const g = d.digest || {};
+    const top = el('div', 'card');
+    top.append(el('h3', null, (v.docs.length > 1 ? `${i + 1}. ` : '') + d.title));
+    if (g.overview) top.append(el('p', null, g.overview));
+    if (d.pdf) top.append(el('p', 'note', '這份是 PDF：數字是 AI 從原檔讀出來的，手機上沒辦法逐字核對，正式使用前請對照原文。'));
+    else if (d.unverified?.length) top.append(el('p', 'note', `⚠️ 這幾個數字在原文找不到，請對照原文確認：${d.unverified.join('、')}`));
+    b.append(top);
+
+    const rows = (list, fmt) => { const u = el('ul'); list.forEach(x => u.append(el('li', null, fmt(x)))); return u; };
+    const src = s => (s ? `（${s}）` : '');
+    if (g.income?.length) b.append(fold('💰 收入結構', i === 0, rows(g.income, x => `${x.item}：${x.how}${notMissing(x.condition) ? `｜條件：${x.condition}` : ''}${src(x.source)}`)));
+    if (g.career?.length) b.append(fold('📈 職涯晉升', false, rows(g.career, x => `${x.level}：${x.requirement}${src(x.source)}`)));
+    if (g.support?.length) b.append(fold('🤝 新人支持', false, rows(g.support, x => `${x.item}：${x.detail}${src(x.source)}`)));
+    if (g.assessment?.length) b.append(fold('📋 考核與留任', false, rows(g.assessment, x => `${x.item}：${x.detail}${src(x.source)}`)));
+    if (g.costs?.length) b.append(fold('💳 需要自行負擔', false, list(g.costs)));
+    if (g.sweet_points?.length || g.challenges?.length) {
+      const w = el('div');
+      if (g.sweet_points?.length) w.append(el('p', 'lbl', '對招募對象的吸引力'), list(g.sweet_points));
+      if (g.challenges?.length) w.append(el('p', 'lbl', '要誠實說明的條件與挑戰'), list(g.challenges));
+      b.append(fold('⚖️ 吸引力與挑戰', false, w));
+    }
+    if (g.faq?.length) {
+      const w = el('div');
+      g.faq.forEach(x => { const q = el('div', 'fabe'); q.append(el('p', 'quote', '對方：' + x.q), el('p', null, '你：' + x.a)); w.append(q); });
+      b.append(fold('💬 對方常問的問題', false, w));
+    }
+    if (g.compliance?.length) b.append(fold('⚠️ 合規提醒', false, list(g.compliance)));
+    if (g.missing?.length) {
+      const f = fold('⚠️ 文件沒寫、不能亂講', false, el('p', 'note', '對方問到這些，老實說「我回去確認後再跟你說明」。'), list(g.missing));
+      f.classList.add('warn');
+      b.append(f);
+    }
+    b.append(coachCard(d));
+  });
+  b.scrollTop = 0;
+}
+
+// 第二層：教練講解。按了才產生（會用額度），每份文件只產生一次，存起來之後直接顯示
+function coachCard(d) {
+  const L = d.lesson;
+  if (!L) {
+    const c = el('div', 'card');
+    c.append(el('h4', null, `✨ 教練講解${learnView.docs.length > 1 ? `：${d.title}` : ''}`));
+    c.append(el('p', 'muted', '60 秒制度介紹稿、必講重點怎麼講、用文件裡的數字舉例、常見的講錯。'));
+    const btn = el('button', 'btn', '產生教練講解');
+    btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = '教練準備中…約 10～20 秒';
+      try {
+        const r = await api('/doc/coach', { id: d.id });
+        d.lesson = r.lesson;
+        learnView = await api('/doc/lesson', { ids: S.docIds });     // 必講重點可能跟著換成教練講解的版本
+        renderLearn();
+      } catch (e) {
+        if (e.auth) return logout(e.message);
+        toast(e.message, 5000); btn.disabled = false; btn.textContent = '產生教練講解';
+      }
+    };
+    c.append(btn, el('p', 'note', '會使用你的 API 額度。每份文件只產生一次，之後會存起來重複看。'));
+    return c;
+  }
+  const c = el('div', 'card coach');
+  c.append(el('h4', null, `✨ 教練講解${learnView.docs.length > 1 ? `：${d.title}` : ''}`));
+  if (L.pitch) c.append(el('p', 'lbl', '60 秒制度介紹稿'), el('p', null, L.pitch));
+  if (L.key_points?.length) {
+    c.append(el('p', 'lbl', '必講重點怎麼講'));
+    L.key_points.forEach((k, i) => {
+      const w = el('div', 'fabe');
+      w.append(el('b', null, `${i + 1}. ${k.point}`));
+      if (k.why) w.append(el('p', 'muted', '對方在意的是：' + k.why));
+      if (k.say) w.append(el('p', null, '「' + k.say.replace(/^「|」$/g, '') + '」'));
+      c.append(w);
+    });
+  }
+  if (L.examples?.length) {
+    c.append(el('p', 'lbl', '用文件裡的數字舉例'));
+    L.examples.forEach(x => { const w = el('div', 'fabe'); if (x.case) w.append(el('b', null, x.case)); w.append(el('p', null, x.explain)); c.append(w); });
+  }
+  if (L.order?.length) { c.append(el('p', 'lbl', '建議的說明順序')); const ol = el('ol'); L.order.forEach(x => ol.append(el('li', null, x))); c.append(ol); }
+  if (L.pitfalls?.length) c.append(el('p', 'lbl', '常見的講錯'), list(L.pitfalls));
+  if (L.unverified?.length) c.append(el('p', 'note', `⚠️ 這幾個數字在制度資料裡找不到，請對照原文確認：${L.unverified.join('、')}`));
+  return c;
+}
+
+$('#l-go').onclick = () => {
+  if (learnFrom === 'review') return show('brief');
+  if (!learnView.seen) api('/doc/seen', { ids: S.docIds }).catch(() => {});
+  openIntake('system');
+};
+$('#l-back').onclick = () => (learnFrom === 'review' ? show('brief') : openDocs());
+$('#b-learn').onclick = () => openLearn('review');
 
 // ── Voice Engine ────────────────────────────────────────────
 // 自動收音的排程用 epoch 擋掉過期的排程（AI業務教練 §4.3）：使用者自己按了麥克風、
@@ -548,9 +754,9 @@ $('#btn-start').onclick = async () => {
   voice.unlock();                                    // iOS：第一句朗讀必須在使用者手勢中
   voice.resetStats();
   // 演練畫面標出現在練的是電訪還是面談，避免搞混
-  $('#p-log').innerHTML = ''; $('#p-name').textContent = (S.fn === 'call' ? '📞 電訪｜' : '🤝 面談｜') + S.persona.name;
-  $('#p-found').hidden = S.fn !== 'meet';
-  if (S.fn === 'meet') $('#p-found').textContent = foundText({ concerns: 0, motives: 0 });
+  $('#p-log').innerHTML = ''; $('#p-name').textContent = `${MODE_TAG[S.fn]}｜${S.persona.name}`;
+  $('#p-found').hidden = S.fn === 'call';
+  if (S.fn !== 'call') $('#p-found').textContent = foundText({ concerns: 0, motives: 0 });
   S.ended = false; show('play');
   if (!supported.stt) toast('這個瀏覽器不支援語音辨識，請用下方文字輸入', 4000);
   else hintVoiceQuality();
@@ -611,7 +817,7 @@ async function submit(text) {
     }
 
     push('#p-log', 'customer', d.text);
-    if (S.fn === 'meet') $('#p-found').textContent = foundText(d.found);
+    if (S.fn !== 'call') $('#p-found').textContent = foundText(d.found);
     if (d.outcome) toast('🎉 ' + d.outcome.label, 3200);
     if (d.warn) toast('注意用語：' + d.warn[0], 4000);
     // 談話結束要在朗讀「之前」就標記：對方講最後一句時使用者若又開口，不能再送出一回合
@@ -722,6 +928,33 @@ function renderFeedback(fb) {
     const c = card(`對方心裡真正在意的事（挖到 ${fc.size + fm.size}／${(fb.concerns?.length || 0) + (fb.motives?.length || 0)}）`);
     if (fb.concerns?.length) { c.append(el('p', 'lbl', '顧慮')); c.append(list(fb.concerns.map(h => (fc.has(h) ? '✅ ' : '⬜ ') + h))); }
     if (fb.motives?.length) { c.append(el('p', 'lbl', '想要的事（動機）')); c.append(list(fb.motives.map(h => (fm.has(h) ? '✅ ' : '⬜ ') + h))); }
+    b.append(c);
+  }
+
+  // 招募制度演練：必講重點、講錯的地方、對不到的數字（R016）
+  if (fb.key_points?.length) {
+    const got = fb.key_points.filter(k => k.covered).length;
+    const c = el('div', 'card key');
+    c.append(el('h4', null, `🎯 必講重點（講到 ${got}／${fb.key_points.length}）`));
+    fb.key_points.forEach(k => {
+      const d = el('div', 'kp');
+      d.append(el('b', null, (k.covered ? '✅ ' : '⬜ ') + k.point));
+      if (k.note) d.append(el('p', 'ev', k.note));
+      c.append(d);
+    });
+    b.append(c);
+  }
+  if (fb.mode === 'system') {
+    const c = el('div', 'card' + (fb.misstatements?.length ? ' warn' : ''));
+    c.append(el('h4', null, fb.misstatements?.length ? `📌 和制度文件不一樣的說法（${fb.misstatements.length} 處）` : '📌 制度內容講得正確'));
+    if (!fb.misstatements?.length) c.append(el('p', 'note', '對照制度文件，沒有發現講錯的數字或條件。'));
+    for (const x of fb.misstatements || []) {
+      const w = el('div', 'imp');
+      w.append(el('b', null, `你說：「${x.quote}」`), el('p', null, '制度文件：' + x.fact));
+      c.append(w);
+    }
+    if (fb.unknown_numbers?.length) c.append(el('p', 'note', `⚠️ 你講的這幾個數字在制度文件裡找不到，請確認：${fb.unknown_numbers.join('、')}`));
+    if (fb.docTitles?.length) c.append(el('p', 'note', '對照的文件：' + fb.docTitles.join('、')));
     b.append(c);
   }
 
@@ -1008,6 +1241,8 @@ function saveHistory(fb) {
       scores: Object.fromEntries(Object.entries(fb.scores || {}).map(([k, v]) => [k, v.score])),
       summary: fb.summary, next: fb.next_challenge,
       violations: fb.violations?.length || 0,
+      kp: fb.key_points?.length ? [fb.key_points.filter(k => k.covered).length, fb.key_points.length] : undefined,
+      wrong: fb.misstatements?.length || undefined,
     });
     my.set(K.history, JSON.stringify(h.slice(0, 50)));
     syncSoon();
@@ -1039,6 +1274,7 @@ function renderHistory() {
     const tot = Object.values(r.scores || {});
     if (tot.length) c.append(el('p', null, [r.outcome && (r.tier === 2 ? '🏆 ' : r.tier === 1 ? '🎉 ' : '') + r.outcome,
       '平均 ' + (tot.reduce((a, x) => a + x, 0) / tot.length).toFixed(1) + ' 星',
+      Array.isArray(r.kp) ? `必講重點 ${r.kp[0]}／${r.kp[1]}` : '', r.wrong ? `講錯 ${r.wrong} 處` : '',
       r.violations ? `⚠️ 合規提醒 ${r.violations} 次` : ''].filter(Boolean).join('｜')));
     if (r.summary) c.append(el('p', 'ev', r.summary));
     b.append(c);
@@ -1056,7 +1292,8 @@ let syncBadge = null, syncing = false, syncTimer;
 function switchOwner() {
   loadChat();
   try { tts.state = ttsStore.load(); } catch { tts.state = {}; }
-  S.lastCandidate = null; S.lastFb = null;
+  S.lastCandidate = null; S.lastFb = null; S.docIds = [];
+  setOwner(uid());                 // 制度文件依帳號分開（store.js）
 }
 
 function bundle() {

@@ -8,12 +8,13 @@
 //   ・顧慮／動機：模型只回報編號，程式對回原文
 //   ・信任度、星等：程式夾住範圍
 
-import { parseJson } from './gateway.js?v=6';
-import { checkCompliance, interventionMessage } from './compliance.js?v=6';
-import * as P from './prompts.js?v=6';
+import { parseJson } from './gateway.js?v=8';
+import { checkCompliance, interventionMessage } from './compliance.js?v=8';
+import * as P from './prompts.js?v=8';
+import * as KB from './knowledge.js?v=8';
 
 // 至少要講幾句才算數：避免第一句就「答應見面」，練不到東西
-export const MIN_TURNS = { call: 2, meet: 4 };
+export const MIN_TURNS = { call: 2, meet: 4, system: 4 };
 // 對方答應的門檻：信任度低於這個值時，模型回報的 commit 不算數（程式把關）
 export const COMMIT_TRUST = 55;
 const SESSION_TTL = 60 * 60 * 1000;
@@ -35,11 +36,19 @@ export function getSession(id) {
 const list = (a, n) => (Array.isArray(a) ? a.filter(x => typeof x === 'string' && x.trim()).slice(0, n) : []);
 
 // ── 建立 Session：Persona + 情境 + 示範話術稿 ─────────────────────
-export async function startSession(gw, { mode = 'call', gender, age, background, difficulty = 1, context = 'warm', contextNote = '' }) {
+// docs：招募制度演練時勾選的制度文件（最多 5 份，企劃書 §12）
+export async function startSession(gw, { mode = 'call', gender, age, background, difficulty = 1, context = 'warm', contextNote = '', docs = [] }) {
   if (!P.MODES[mode]) throw new Error('unknown_mode');
+  if (mode === 'system' && !docs.length) throw new Error('請先選擇制度文件');
   difficulty = Math.min(5, Math.max(1, Number(difficulty) || 1));
   if (!P.CONTEXTS[context]) context = 'warm';
-  const base = P.personaPrompt({ gender, age, background, difficulty, mode, context, contextNote });
+  // 制度資料、必講重點、可以講的數字，都在建立演練時抓下來存進 session：
+  // 演練中途才產生教練講解，也不會讓評分標準變動（AI業務教練 D040）
+  const sys = mode === 'system' ? {
+    brief: KB.systemBrief(docs), keyPoints: KB.keyPointsFor(docs), known: KB.knownNumbers(docs),
+    titles: docs.map(d => d.title || d.name),
+  } : null;
+  const base = P.personaPrompt({ gender, age, background, difficulty, mode, context, contextNote, brief: sys?.brief || '' });
 
   // 示範話術有問題（洩漏私人資訊、編造收入數字）就重新產生，並具體說出錯在哪（AI業務教練 §4.1：籠統的「請修正」沒用）
   let p = null, problem = null;
@@ -50,7 +59,8 @@ export async function startSession(gw, { mode = 'call', gender, age, background,
     });
     p = parseJson(r.text);
     if (!p?.opening_line || !p?.demo) { problem = null; continue; }
-    problem = P.demoProblem(p.demo);
+    // 制度演練：數字可以講，但要對得回制度資料（R016）；其他演練：一律不准給收入數字（R009）
+    problem = sys ? P.systemDemoProblem(p.demo, sys.known) : P.demoProblem(p.demo);
     if (!problem) break;
     console.warn(`[persona] 示範話術有問題：${problem}，重新產生`);
   }
@@ -63,7 +73,7 @@ export async function startSession(gw, { mode = 'call', gender, age, background,
   p.motives = list(p.motives, 2);
   p.objections = list(p.objections, 3);
 
-  const persona = { ...p, gender, age, background, difficulty, contextNote };
+  const persona = { ...p, gender, age, background, difficulty, contextNote, systemBrief: sys?.brief || '' };
   const D = P.difficultyOf(difficulty);
   // 初始信任度由程式夾在難度區間內（AI業務教練 D021）
   const trust = Math.min(D.trust[1], Math.max(D.trust[0], Number(p.trust) || D.trust[0]));
@@ -77,6 +87,7 @@ export async function startSession(gw, { mode = 'call', gender, age, background,
     commit: null,                // 程式認可的最佳結果（commit 鍵）
     guidance: 0, guided: 0, declined: false,
     startedAt: null, touched: Date.now(), lastUser: '', latency: [],
+    sys,
   });
 
   return {
@@ -90,6 +101,7 @@ export async function startSession(gw, { mode = 'call', gender, age, background,
     demo: P.scrubDeep(p.demo),
     opening: p.opening_line,
     totals: { concerns: p.concerns.length, motives: p.motives.length },
+    keyPoints: sys?.keyPoints || null, docTitles: sys?.titles || null,
   };
 }
 
@@ -207,7 +219,7 @@ export async function handleTurn(gw, s, userText) {
     say = '不好意思，我覺得我們今天先聊到這裡就好，之後有需要我再跟你聯絡，好嗎？';
   }
   else if (s.mode === 'call' && s.commit === 'meet') ended = true;
-  else if (s.mode === 'meet' && s.commit === 'license') ended = true;
+  else if (s.mode !== 'call' && s.commit === 'license') ended = true;
   if (ended) s.state = 'COMPLETED';
 
   s.latency.push(ms);
@@ -251,6 +263,7 @@ async function evaluateInner(gw, s) {
   const prompt = P.evaluationPrompt({
     persona: s.persona, transcript: s.history.filter(h => h.speaker !== 'system'),
     metrics, violations: s.violations, mode: s.mode, context: s.context, outcome,
+    systemBrief: s.sys?.brief || '', keyPoints: s.sys?.keyPoints || null,
   });
 
   let fb = null;
@@ -279,6 +292,20 @@ async function evaluateInner(gw, s) {
   // 違規一定要點名（GPT 版：回饋時一定要特別點名指正）——不靠模型記得寫，程式附上
   fb.violations = s.violations.map(v => ({ type: v.type, law: v.law, why: v.why, quote: v.quote, level: v.level }));
 
+  // 招募制度演練（R016）：
+  //   ・必講重點：只信任模型給的編號與 true/false，重點文字用清單原文
+  //   ・講錯的地方：引用的原句必須真的出現在招募者的逐字稿裡
+  //   ・對不到的數字：招募者講的帶單位數字，制度資料裡找不到的，由程式列出（不靠模型）
+  if (s.sys) {
+    const said = s.history.filter(h => h.speaker === 'user').map(h => h.text);
+    fb.key_points = P.normalizeKeyPoints(s.sys.keyPoints, fb.key_points);
+    fb.misstatements = P.groundMisstatements(fb.misstatements, said);
+    fb.unknown_numbers = P.unknownNumbers(said.join('\n'), s.sys.known);
+    fb.docTitles = s.sys.titles;
+  } else {
+    delete fb.key_points; delete fb.misstatements;
+  }
+
   s.state = 'FEEDBACK_READY';
   return {
     ...fb, metrics, outcome, mode: s.mode,
@@ -287,8 +314,8 @@ async function evaluateInner(gw, s) {
     difficultyLabel: P.difficultyOf(s.difficulty).label,
     persona: { name: s.persona.name, summary: s.persona.public_summary },
     transcript: s.history.filter(h => h.speaker !== 'system').map(h => ({ speaker: h.speaker, text: h.text })),
-    concerns: s.mode === 'meet' ? s.persona.concerns : null,        // 演練結束後才揭露
-    motives: s.mode === 'meet' ? s.persona.motives : null,
+    concerns: s.mode !== 'call' ? s.persona.concerns : null,        // 演練結束後才揭露
+    motives: s.mode !== 'call' ? s.persona.motives : null,
     avgLatencyMs: s.latency.length ? Math.round(s.latency.reduce((a, b) => a + b, 0) / s.latency.length) : 0,
   };
 }

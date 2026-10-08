@@ -107,7 +107,12 @@ if (section(1, '規則層（不用金鑰）')) {
   ok(!noEl.length, `app.js 用到的 ${used.length} 個畫面元件都存在`, noEl.join(', '));
   ok(html.includes('提醒：生成內容僅供自學參考，請勿公開分享。'), '歡迎頁有「生成內容僅供自學參考」提醒');
   ok((html.match(/業務員網路言行不得涉及招攬保險或招募行為/g) || []).length >= 2, '歡迎頁與首頁都有「網路言行」提醒');
-  ok(!/type="file"/.test(html), '沒有任何上傳檔案的入口（GPT 版：嚴禁接受截圖）');
+  // GPT 版：嚴禁接受截圖。第二版只在「公司招募制度」頁可以上傳文件，而且只收文件格式
+  const inputs = [...html.matchAll(/<input[^>]*type="file"[^>]*>/g)].map(m => m[0]);
+  const docsSec = html.slice(html.indexOf('id="s-docs"'), html.indexOf('</section>', html.indexOf('id="s-docs"')));
+  ok(inputs.length === 1 && docsSec.includes('type="file"') && !/image|.png|.jpe?g|.heic|.bmp/i.test(inputs[0]),
+    '只有制度文件頁可以上傳，而且不收圖片（GPT 版：嚴禁接受截圖）', inputs.join(' '));
+  ok(/const DB = 'recruit'/.test(read('docs/engine/store.js')), '制度文件的 IndexedDB 叫 recruit（不和 AI業務教練的 aicoach 共用）');
 
   // ── 原始碼衛生 ──
   // shell → Python 寫檔時 \b、\n 會變成真的控制字元（AI業務教練 D037）
@@ -322,8 +327,91 @@ if (section(2, '演練規則（假的模型，不用金鑰）')) {
   }
 }
 
-// ── 第 3～6 節：真的呼叫 Gemini ──
-const LIVE = !only || ['3', '4', '5', '6'].includes(only);
+// ── 第二版：公司招募制度演練（假的模型）──
+const FIX = path.join(ROOT, 'tools', 'fixtures');
+const DOCX = '收入制度（虛構）.docx', PDF = '晉升考核辦法（虛構）.pdf';
+const b64 = n => fs.readFileSync(path.join(FIX, n)).toString('base64');
+if (section(7, '公司招募制度演練的規則（假的模型，不用金鑰）')) {
+  const KB = await import('../docs/engine/knowledge.js?v=' + /const VERSION = 'v(\d+)'/.exec(read('docs/sw.js'))[1]);
+  const store = await import('../docs/engine/store.js?v=' + /const VERSION = 'v(\d+)'/.exec(read('docs/sw.js'))[1]);
+
+  // ── 數字核對（R016）──
+  const known = P.numberSet('每月發給新人津貼 25,000 元，FYC 達 20,000 元。陪同展業 3 個月。每季未達 60,000 元列入輔導。佣金率 15% 至 40%。直轄增員 2 人。');
+  const U = t => P.unknownNumbers(t, known);
+  ok(!U('每月 2.5萬 津貼').length && !U('每季要達到 6 萬').length && !U('津貼 25000元').length, '金額換算後對得到（2.5 萬＝25,000 元、6 萬＝60,000 元）');
+  ok(U('佣金 50%').join() === '50%' && U('到職 6 個月').join() === '6個月' && U('增員 3 人').join() === '3人', '文件沒有的數字被找出來（50%、6 個月、3 人）');
+  ok(!U('週六下午 3 點見').length, '不帶單位的數字（時間）不檢查');
+  ok(P.systemDemoProblem({ income: '首年佣金最高 60%' }, known)?.includes('60%'), '示範話術出現文件沒有的數字 → 退回，並說出是哪個數字');
+  ok(P.systemDemoProblem({ income: '前 12 個月每月 25,000 元津貼，條件是 FYC 達 20,000 元' }, P.numberSet('前 12 個月 25,000 元 20,000 元')) === null, '數字都對得到 → 通過');
+
+  // ── 講錯的地方：原句一定要真的出現在招募者的逐字稿 ──
+  const g = P.groundMisstatements([{ quote: '到職滿 3 個月就可以升了', fact: '滿 6 個月' }, { quote: '我從來沒說過這句話啦', fact: 'x' }, { quote: '短', fact: 'x' }],
+    ['晉升業務主任很快，到職滿 3 個月就可以升了，而且一定升得上去。']);
+  ok(g.length === 1 && g[0].quote.startsWith('到職滿'), '「講錯的地方」只留下逐字稿裡真的有的原句（模型編的會被丟掉）');
+  const kp = P.normalizeKeyPoints(['甲', '乙', '丙'], [{ n: 2, covered: true, note: 'x' }, { n: 2, covered: false }, { n: 9, covered: true }]);
+  ok(kp.map(k => k.covered).join() === 'false,true,false' && kp[0].point === '甲', '必講重點：只信任編號與 true／false，文字用清單原文');
+
+  // ── 上傳與研讀（Word 在手機上拆字；整理裡的數字對回原文）──
+  store.setOwner('owner-A');
+  const DIG = {
+    title: '收入制度', overview: 'o',
+    income: [{ item: '首年度佣金', how: '15% 至 40%', condition: '文件未載明條件' }, { item: '新人津貼', how: '每月 25,000 元', condition: '當月 FYC 達 20,000 元' }],
+    career: [], support: [{ item: '報名費', detail: '公司負擔' }], assessment: [], sweet_points: ['每月 99,999 元'],
+  };
+  const gw = fakeGw([DIG]);
+  gw.supportsFile = true;
+  const up = await KB.ingest(gw, { name: DOCX, base64: b64(DOCX) });
+  ok(gw.calls[0].text.includes('新人津貼 25,000 元') && !gw.calls[0].opts.file, 'Word 檔在手機上拆出文字送給 AI（不送原檔）');
+  ok(/\n第二條/.test(gw.calls[0].text), 'Word 的段落換行有保留（AI業務教練的 docx.js 會整份黏成一行）');
+  const doc = await KB.getDoc(up.id);
+  ok(doc.unverified?.join() === '99,999元', `整理裡原文找不到的數字被標出來（${doc.unverified}）`);
+  ok(/找不到/.test(up.warning || ''), '上傳結果提醒有數字要核對');
+  ok(!/圖片/.test(up.warning || ''), '短短的 Word 檔不會被誤報「大多是圖片」');
+  const gw2 = fakeGw([{ ...DIG, title: '晉升辦法', career: [{ level: '業務主任', requirement: '到職滿 6 個月' }] }]);
+  gw2.supportsFile = true;
+  const up2 = await KB.ingest(gw2, { name: PDF, base64: b64(PDF) });
+  ok(gw2.calls[0].opts.file?.mime === 'application/pdf', 'PDF 原檔交給 AI 讀');
+  const d2 = await KB.getDoc(up2.id);
+  ok(d2.pdf && d2.unverified === null, 'PDF 沒有原文可以比對 → 標記為「請自行核對」，而不是假裝核對過');
+  ok(!KB.keyPointsOf(doc).some(k => /文件未載明/.test(k)), '必講重點不會出現「文件未載明」');
+  const both = KB.keyPointsFor([doc, d2]);
+  ok(both.length === 3 && both.some(k => k.includes('業務主任')), `兩份文件的必講重點輪流各取（${both.join('｜')}）`);
+  ok(KB.systemBrief([doc, d2]).includes('《收入制度》') && KB.systemBrief([doc, d2]).includes('《晉升辦法》'), '演練用的制度資料包含勾選的每一份');
+  let err = null;
+  try { await KB.ingest(gw, { name: 'a.doc', base64: 'AAAA' }); } catch (e) { err = e.message; }
+  ok(/另存/.test(err || ''), '舊版 .doc 擋下來並教怎麼辦');
+
+  // ── 文件依帳號分開（AI業務教練 D047）──
+  store.setOwner('owner-B');
+  ok((await KB.listDocs()).length === 0, '換人登入看不到前一位的制度文件');
+  store.setOwner('owner-A');
+  ok((await KB.listDocs()).length === 2, '換回來文件都還在');
+
+  // ── 演練：示範話術數字核對、講錯點名、對不到的數字 ──
+  const SYS_P = { ...PERSONA, demo: { opening: 'o', income: '首年佣金最高 60%', close: 'c' } };
+  const gw3 = fakeGw([SYS_P, { ...SYS_P, demo: { opening: 'o', income: '前 12 個月每月 25,000 元津貼', close: 'c' } }, turn({ trust_delta: 3 }), {
+    summary: 's', scores: { fluency: 3, friendliness: 3, awareness: 3, confidence: 3, professionalism: 3 },
+    misstatements: [{ quote: '到職滿 3 個月就可以升', fact: '要滿 6 個月' }, { quote: '這句招募者沒講過', fact: 'x' }],
+    key_points: [{ n: 1, covered: true }],
+  }]);
+  const d3 = await CE.startSession(gw3, { mode: 'system', gender: '女', age: '38', background: '全職媽媽', docs: [doc, d2] });
+  ok(gw3.calls.length === 2 && /60%/.test(gw3.calls[1].text), '制度演練：示範話術出現文件沒有的數字 → 指出數字並重產生');
+  ok(d3.keyPoints.length === 3 && d3.docTitles.length === 2, '畫面拿到必講重點與對照的文件名稱');
+  ok(/對方公司的制度資料/.test(gw3.calls[0].text) === false && /招募者公司的制度資料/.test(gw3.calls[0].text), '建立招募對象時附上制度資料');
+  const s3 = CE.getSession(d3.sessionId); CE.beginRoleplay(s3);
+  await CE.handleTurn(gw3, s3, '到職滿 3 個月就可以升主管，佣金最高 50%');
+  ok(/對方公司的制度資料/.test(gw3.calls.at(-1).opts.system), '演練時對方知道制度的大概（才問得出細節），但被要求不主動講');
+  const fb3 = await CE.evaluate(gw3, s3);
+  ok(fb3.misstatements.length === 1, '回饋：講錯的地方只留逐字稿裡真的有的');
+  ok(fb3.unknown_numbers.join() === '3個月,50%', `回饋：程式找出文件沒有的數字（${fb3.unknown_numbers}）`);
+  ok(fb3.key_points.length === 3 && fb3.key_points[0].covered, '回饋：必講重點逐點檢查');
+  let e2 = null;
+  try { await CE.startSession(gw3, { mode: 'system', gender: '女', age: '38', background: 'x', docs: [] }); } catch (e) { e2 = e.message; }
+  ok(/請先選擇制度文件/.test(e2 || ''), '沒有勾文件不能開始制度演練');
+}
+
+// ── 第 3～6、8 節：真的呼叫 Gemini ──
+const LIVE = !only || ['3', '4', '5', '6', '8'].includes(only);
 let live = null;
 if (LIVE) {
   const keys = geminiKeys();
@@ -349,7 +437,7 @@ if (live && section(3, '招募對象痛點分析（Gemini）')) {
 }
 
 async function play(mode, x, lines, opts = {}) {
-  const [d, ms] = await clock(() => live('/session/start', { mode, ...x, context: opts.context || 'warm', difficulty: opts.difficulty || 1 }));
+  const [d, ms] = await clock(() => live('/session/start', { mode, ...x, context: opts.context || 'warm', difficulty: opts.difficulty || 1, docIds: opts.docIds }));
   await live('/session/begin', { sessionId: d.sessionId });
   const rs = [];
   for (const line of lines) {
@@ -421,6 +509,41 @@ if (live && section(6, '問問招募教練（Gemini）')) {
   ok(/無法提供/.test(c.reply) && !/嚴禁|【/.test(c.reply), '要求提示詞 → 一致的拒絕回覆，不洩漏內部規則');
   const v = await live('/coach/chat', { history: [], message: '怎麼跟工程師談這份工作的收入？', voice: true });
   ok(v.reply.length <= 260, `語音對談模式回覆簡短（${v.reply.length} 字）`);
+}
+
+if (live && section(8, '公司招募制度演練（Gemini，虛構的制度文件）')) {
+  const [w, wms] = await clock(() => live('/doc/upload', { name: DOCX, base64: b64(DOCX) }));
+  const [p, pms] = await clock(() => live('/doc/upload', { name: PDF, base64: b64(PDF) }));
+  const v = await live('/doc/lesson', { ids: [w.id, p.id] });
+  const [gw_, gp] = v.docs.map(d => d.digest);
+  const all = JSON.stringify(v.docs.map(d => d.digest));
+  ok(gw_.income.some(x => /25,000/.test(x.how + x.condition)) && gw_.income.some(x => /20,000/.test(x.how + x.condition)), `Word：研讀出新人津貼 25,000 元與條件 FYC 20,000 元（${wms}ms）`);
+  ok(v.docs[0].unverified?.length === 0, 'Word：整理裡每個數字都對得回原文', String(v.docs[0].unverified));
+  ok(gp.career.some(x => /6 ?個月/.test(x.requirement) && /300,000/.test(x.requirement)), `PDF：研讀出業務主任的晉升條件（${pms}ms）`);
+  ok(gp.assessment.some(x => /60,000/.test(x.detail)), 'PDF：研讀出考核標準');
+  ok(!/國泰|富邦|南山/.test(all) && !ZH_SIMPLIFIED.test(all), '整理沒有真實公司名、沒有簡體字');
+  ok(v.keyPoints.length === 3 && !v.keyPoints.some(k => /文件未載明/.test(k)), `必講重點 3 點（${v.keyPoints.join('｜')}）`);
+
+  const [c, cms] = await clock(() => live('/doc/coach', { id: w.id }));
+  ok(c.lesson.key_points.length === 3 && c.lesson.pitch, `教練講解：60 秒介紹稿與 3 個必講重點（${cms}ms）`);
+  ok(!c.lesson.unverified, '教練講解裡的數字都對得回制度資料', String(c.lesson.unverified));
+
+  const { d, rs, fb } = await play('system', P.SAMPLES.find(s => s.key === 'mom'), [
+    '謝謝你今天來聽。你最在意的是收入、時間，還是培訓？',
+    '新人前 12 個月，每個月有 25,000 元的新人津貼，條件是當月 FYC 要達到 20,000 元，沒達到那個月就沒有。',
+    '晉升業務主任很快，到職滿 3 個月就可以升了，而且一定升得上去。',
+    '我要誠實跟你說，每季 FYC 沒有達到 60,000 元會列入輔導，連續 2 季沒達到就會終止合約。到職第 1 個月有 30 天新人訓練，主管會陪你展業 3 個月。',
+    '這週六有一場事業說明會，你要不要來聽聽看？聽完不適合也沒關係。',
+  ], { difficulty: 1, docIds: [w.id, p.id] });
+  {
+    ok(['opening', 'income', 'career', 'support', 'challenge', 'close'].every(k => d.demo?.[k]), '制度示範話術稿：開場→收入→晉升→新人支持→挑戰→邀約');
+    ok(!P.systemDemoProblem(d.demo, P.numberSet(JSON.stringify(v.docs.map(x => x.digest)))), '示範話術的數字都對得回制度資料');
+    ok(fb.misstatements.some(x => /3 ?個月|一定升/.test(x.quote)), `回饋點出「到職滿 3 個月一定升得上去」是錯的（${fb.misstatements.map(x => x.quote).join('｜')}）`);
+    ok(fb.key_points?.length === 3 && fb.key_points.some(k => k.covered), `必講重點逐點檢查（講到 ${fb.key_points?.filter(k => k.covered).length}／3）`);
+    ok(scored(fb), '五項評分在範圍內');
+    console.log(`      結果：${fb.outcome.label}｜${rs.length} 句`);
+  }
+  for (const id of [w.id, p.id]) await live('/doc/delete', { id });
 }
 
 console.log(`\n${fail ? '❌' : '✅'} ${pass} 項通過${fail ? `，${fail} 項失敗` : ''}\n`);

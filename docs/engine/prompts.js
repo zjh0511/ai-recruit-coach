@@ -184,17 +184,80 @@ export const MODES = {
     },
     demoHint: '破冰、了解現況的問題、引出動機的追問、簡短介紹事業機會、一個顧慮處理、邀約下一步',
   },
+  // 第二版：公司招募制度演練（企劃書 §12）。對方已經有興趣，要聽招募者說明公司的制度。
+  system: {
+    name: '招募制度說明',
+    situation: '你已經和對方聊過，對保險業有一點興趣，今天坐下來聽他說明他們公司的制度。你會認真聽，但會一直追問實際的問題。',
+    objective: '把公司的招募制度講清楚、講對、講出條件，並讓對方願意往下一步走（事業說明會、二次面談，最好是願意去考照）',
+    commits: {
+      seminar: '答應參加事業說明會（創說會）',
+      second: '答應再約一次面談',
+      license: '願意去報考業務員資格測驗（考照）',
+    },
+    demoHint: '開場、說明收入結構、說明晉升路徑、說明新人支持、誠實說明挑戰與條件、一個疑問的回應、邀約下一步',
+  },
 };
 
 // 結果分級（程式判定，與五項星等分開）。tier：0 未成功／1 成功／2 最佳
+const NEXT_STEP = {
+  second: { tier: 1, label: '答應二次面談' },
+  seminar: { tier: 1, label: '答應參加事業說明會' },
+  license: { tier: 2, label: '願意去考照' },
+};
 export const OUTCOMES = {
   call: { meet: { tier: 1, label: '約到見面' } },
-  meet: {
-    second: { tier: 1, label: '答應二次面談' },
-    seminar: { tier: 1, label: '答應參加事業說明會' },
-    license: { tier: 2, label: '願意去考照' },
-  },
+  meet: NEXT_STEP,
+  system: NEXT_STEP,
 };
+
+// 招募制度演練時，對方會追問的面向（企劃書 §12.4 S5）
+export const SYSTEM_QUESTIONS = ['收入怎麼算', '新人有沒有底薪或津貼', '多久能升主管', '考核標準、會不會被淘汰', '要不要自己出錢', '培訓怎麼安排'];
+
+// ── 制度文件的數字核對（R016）──────────────────────────────────────
+// 第一版規定 AI 不准給任何收入數字（R009）。招募制度演練的數字來自公司文件，所以改成：
+// 可以引用，但每個「帶單位的數字」都必須真的出現在文件裡——由程式比對，不靠模型自律。
+// 只看帶單位的數字（％、萬、元、倍、個月、人…），「下午 3 點」「第 2 點」這類不算。
+// 比對的是「數值＋單位種類」：文件寫「陪同 3 個月」，招募者說「3 個月就能升主管」要對得到；
+// 但文件只有「第 3 條」或「3 人」時，「3 個月」就算對不到（實測時只比數值，漏抓了這種講錯）。
+// 金額換算成元再比：「6 萬」＝「60,000 元」。
+const NUM_UNIT = /(\d[\d,]*(?:\.\d+)?)\s*(%|％|萬元|萬|千元|千|元|塊|倍|個月|月|年|天|週|季|個人|人|件|級|分)?/g;
+const UNIT_KIND = { '%': 'pct', '％': 'pct', 萬元: 'money', 萬: 'money', 千元: 'money', 千: 'money', 元: 'money', 塊: 'money',
+  倍: 'x', 個月: 'month', 月: 'month', 年: 'year', 天: 'day', 週: 'week', 季: 'season', 個人: 'person', 人: 'person', 件: 'case', 級: 'level', 分: 'point' };
+function numKey(n, unit) {
+  let v = Number(n.replace(/,/g, ''));
+  if (!Number.isFinite(v)) return null;
+  if (unit === '萬' || unit === '萬元') v *= 10000;
+  if (unit === '千' || unit === '千元') v *= 1000;
+  return { kind: UNIT_KIND[unit] || null, v: Math.round(v * 1000) / 1000 };
+}
+// 文件裡出現過的數字：有單位的記「種類:數值」，沒單位的記「any:數值」（沒單位的數字可以對到任何單位）
+export function numberSet(text) {
+  const set = new Set();
+  for (const m of String(text || '').matchAll(NUM_UNIT)) {
+    const k = numKey(m[1], m[2]); if (!k) continue;
+    set.add(`${k.kind || 'any'}:${k.v}`);
+  }
+  return set;
+}
+// text 裡帶單位、但文件裡找不到的數字（原樣回傳，例如「30%」「3 萬」「3 個月」）
+export function unknownNumbers(text, known) {
+  const out = [];
+  for (const m of String(text || '').matchAll(NUM_UNIT)) {
+    if (!m[2]) continue;                                  // 「下午 3 點」「第 2 點」這類不帶單位的不檢查
+    const k = numKey(m[1], m[2]); if (!k) continue;
+    if (!known.has(`${k.kind}:${k.v}`) && !known.has(`any:${k.v}`)) out.push(m[0].replace(/\s+/g, ''));
+  }
+  return [...new Set(out)];
+}
+
+// 招募制度演練的示範話術檢查：不能洩漏私人資訊；數字一定要對得到文件
+export function systemDemoProblem(demo, known) {
+  const text = JSON.stringify(demo || {});
+  if (PRIVATE_LEAK.test(text)) return '講出了你在這個情境下不可能知道的對方私人資訊（例如收入、存款、負債）';
+  const bad = unknownNumbers(text, known);
+  if (bad.length) return `出現了制度資料裡沒有的數字（${bad.join('、')}）。數字只能照抄制度資料，資料沒寫的就不要講數字`;
+  return null;
+}
 
 // ── 招募對象原型（範例，按一下帶入資料卡）────────────────────────
 export const SAMPLES = [
@@ -256,11 +319,12 @@ ${NO_BRAND}
 }
 
 // ── 建立招募對象 Persona + 情境 + 示範話術 ──────────────────────────
-export function personaPrompt({ gender, age, background, difficulty, mode = 'call', context = 'warm', contextNote = '' }) {
+export function personaPrompt({ gender, age, background, difficulty, mode = 'call', context = 'warm', contextNote = '', brief = '' }) {
   const M = MODES[mode] || MODES.call;
   const C = contextOf(context);
   const D = difficultyOf(difficulty);
-  const meet = mode === 'meet';
+  const meet = mode !== 'call';            // 面談與制度說明都是當面
+  const sys = mode === 'system';
 
   return `${BASE}
 
@@ -272,7 +336,7 @@ export function personaPrompt({ gender, age, background, difficulty, mode = 'cal
 難度等級：${difficulty}｜${D.label}——${D.desc}
 本次情境：${M.situation}
 招募者和他的關係：${C.label}
-${contextNote ? `使用者補充的情境說明：${contextNote}\n` : ''}
+${contextNote ? `使用者補充的情境說明：${contextNote}\n` : ''}${sys ? `\n【招募者公司的制度資料（示範話術裡的數字只能照抄這裡）】\n${brief}\n` : ''}
 【招募者此刻已知的資訊——這是設計示範話術的唯一依據】
 ${C.known}
 開場要求：${C.open}
@@ -280,7 +344,8 @@ ${C.known}
 【⚠️ 最重要的規則】
 你在下面會設計出對方心裡的顧慮（concerns）與動機（motives）。這些是「對方心裡的事」，招募者還不知道。
 示範話術裡嚴禁直接講出這些，也嚴禁出現招募者不可能知道的私人資訊（收入、存款、負債、家庭隱私）。
-示範話術裡也不得出現任何具體的收入數字、百分比或統計數據；真的講到收入或制度細節時，才補一句「以公司制度為準」，沒講到就不必硬加。
+${sys ? '示範話術講到收入、晉升、津貼時，數字只能照抄上面的制度資料，而且一定要講清楚要達成什麼條件；資料沒寫的就不要講數字。最高值不能講成人人都拿得到。'
+  : '示範話術裡也不得出現任何具體的收入數字、百分比或統計數據；真的講到收入或制度細節時，才補一句「以公司制度為準」，沒講到就不必硬加。'}
 
 ${RAPPORT}
 
@@ -303,7 +368,7 @@ ${D.canEnd ? '' : '這一級的對象不會主動結束談話，opening_line 也
 4. objections 是他最可能講出口的拒絕原話，2～3 句。
 5. opening_line 與招募對象講的每一句話都不得出現「○○」這種代稱符號，也不必自報姓名。opening_line 是這段${meet ? '面談一開始他說的第一句話（坐下來寒暄的一句）' : '電話接起來他說的第一句話（例如「喂？」「喂，哪位？」或認得對方時的招呼）'}，要短、像真人。
 6. demo 是給招募者看的示範話術稿，要簡短、口語，包含：${M.demoHint}。示範不是標準答案，只是讓他知道怎麼起手。
-${meet ? '   面談的示範順序：建立信任 → 了解現況 → 引出動機 → 簡短介紹事業機會 → 處理顧慮 → 邀約下一步（事業說明會或二次面談，最好是考照）。\n' : '   電話的目標只有一個：約到見面。不要在電話裡講完整套制度、不談收入。\n'}7. 所有推測都是「可能」，不得寫成事實。
+${sys ? '   制度說明的示範順序：先確認對方最在意什麼 → 收入結構（用制度資料裡的數字舉一個簡單例子）→ 晉升路徑 → 新人支持 → 誠實說明考核與挑戰 → 回應一個疑問 → 邀約下一步。\n' : meet ? '   面談的示範順序：建立信任 → 了解現況 → 引出動機 → 簡短介紹事業機會 → 處理顧慮 → 邀約下一步（事業說明會或二次面談，最好是考照）。\n' : '   電話的目標只有一個：約到見面。不要在電話裡講完整套制度、不談收入。\n'}7. 所有推測都是「可能」，不得寫成事實。
 
 ${NO_BRAND}
 （此規則只適用於 demo。opening_line 是招募對象講的話。）
@@ -324,7 +389,15 @@ ${NO_BRAND}
   "voice_hint": { "rate": 0.9到1.2的數字, "pitch": 0.8到1.2的數字 },
   "opening_line": "對話一開始他說的第一句話",
   "scenario": { "objective": "${M.objective}，寫成貼合這位對象的一句話" },
-  "demo": ${meet ? `{
+  "demo": ${sys ? `{
+    "opening": "開場，先確認對方最在意什麼",
+    "income": "說明收入結構（數字照抄制度資料，講清楚條件）",
+    "career": "說明晉升路徑",
+    "support": "說明新人支持（津貼、培訓、輔導）",
+    "challenge": "誠實說明考核與挑戰",
+    "concern": { "candidate": "他可能追問的問題", "you": "依制度資料的回應" },
+    "close": "邀約下一步的說法"
+  }` : meet ? `{
     "icebreak": "破冰",
     "situation_q": "了解現況的問題",
     "motive_q": "引出動機的追問",
@@ -348,6 +421,10 @@ const MODE_RULES = {
   meet: {
     easy: '你已經願意坐下來聊，氣氛輕鬆。你只回答被問到的事，但只要他問到相關話題、讓你覺得被理解，你就願意多講一點心裡話。他若一直講制度、講公司，沒有先了解你，你會提醒他「這個我還不太確定耶」。',
     hard: '你已經坐下來了，所以不會馬上離開。但你只回答被問到的事——問得淺就答得淺，只有問到真正戳中你的問題，你才會講內心話。他若一直推銷、一直講收入多好，你會明顯變冷淡、更防備。',
+  },
+  system: {
+    easy: '你已經有興趣，今天是來聽他說明制度的。你會認真聽，聽不懂就問，常會追問實際的問題（收入怎麼算、新人有沒有津貼、多久能升主管、會不會被淘汰、要不要自己出錢、培訓怎麼安排）。他講清楚了你會點頭，也願意往下一步走。',
+    hard: '你已經有興趣，但很務實。你會一直追問細節與條件（收入怎麼算、要達成什麼才領得到、多久能升、沒達標會怎樣、要不要自己出錢），他講得含糊、只講最好的情況、或前後說法不一樣，你會直接點出來並更懷疑。',
   },
 };
 const modeRule = (mode, difficulty) => {
@@ -398,7 +475,12 @@ ${(p.motives || []).map((h, i) => `  ${i + 1}. ${h}`).join('\n')}
 你最可能講出口的拒絕：${(p.objections || []).join('；')}
 
 【本模式規則】${modeRule(mode, p.difficulty)}
-${mode === 'call' ? PHONE_LOCK : ''}
+${mode === 'call' ? PHONE_LOCK : ''}${mode === 'system' && p.systemBrief ? `
+【對方公司的制度資料】
+這份資料只是讓你知道「可以問什麼」。你事前並不了解這些內容，不會主動講出裡面的細節或數字，
+只能根據對方說的內容回應與追問。對方說得含糊時，就追問條件；對方前後說法不一致時，就點出來。
+${p.systemBrief}
+` : ''}
 【本次難度：${D.label}】${D.desc}
 ${D.rules}
 ${D.canEnd ? '' : '【重要】這一級你不會主動結束談話。\n'}
@@ -462,16 +544,18 @@ ${mode === 'call' ? '（提醒：你們現在是在講電話，沒有見面。�
 const MODE_FOCUS = {
   call: '本次重點是招募邀約電訪：開場有沒有坦白交代來意、有沒有給對方退路、有沒有承接拒絕、有沒有明確提出見面邀約（時間、地點）。電話裡講太多制度或收入是扣分。',
   meet: '本次重點是招募面談：有沒有先建立信任、了解對方現況、用提問引出對方的動機，再把事業機會連結到他的需要；面對顧慮有沒有先承接再回應、有沒有誠實說明挑戰；最後有沒有明確邀約下一步（事業說明會、二次面談、考照）。特別檢查招募者挖到了幾項顧慮與動機。',
+  system: '本次重點是說明公司招募制度：有沒有先了解對方在意什麼再說明；收入、晉升、津貼、考核講得對不對（以制度資料為準）、有沒有把達成條件講清楚、有沒有把最高值講成人人都拿得到；有沒有用對方聽得懂的例子；有沒有誠實說明考核與挑戰；最後有沒有邀約下一步。',
 };
 
-export function evaluationPrompt({ persona, transcript, metrics, violations, mode = 'call', context = 'warm', outcome }) {
+export function evaluationPrompt({ persona, transcript, metrics, violations, mode = 'call', context = 'warm', outcome, systemBrief = '', keyPoints = null }) {
   const M = MODES[mode] || MODES.call;
   const C = contextOf(context);
   const convo = transcript.map(t => `${t.speaker === 'user' ? '招募者' : '招募對象'}：${t.text}`).join('\n');
   const v = violations.length
     ? violations.map(x => `・${x.type}（${x.level === 'high' ? '高風險' : '需注意'}，${x.law}）：原句「${x.quote}」— ${x.why}`).join('\n')
     : '（本次未偵測到違規用語）';
-  const meet = mode === 'meet';
+  const meet = mode !== 'call';
+  const sys = mode === 'system';
 
   return `${BASE}
 
@@ -493,6 +577,20 @@ ${RAPPORT}
 ${meet ? `【對方心裡的顧慮（招募者原本看不到）】${(persona.concerns || []).join('；')}
 【對方心裡想要的（招募者原本看不到）】${(persona.motives || []).join('；')}
 【招募者本次挖到的】顧慮：${metrics.concernsFound.length ? metrics.concernsFound.join('；') : '（沒有）'}｜動機：${metrics.motivesFound.length ? metrics.motivesFound.join('；') : '（沒有）'}
+` : ''}${sys ? `
+【公司的制度資料（判斷招募者說得對不對的唯一依據）】
+${systemBrief}
+${keyPoints?.length ? `
+【這次必講的重點（招募者在演練前的制度重點頁看過）】
+${keyPoints.map((k, i) => `${i + 1}. ${k}`).join('\n')}
+逐一判斷招募者有沒有把這幾點講給對方聽：意思有傳達到就算，不必逐字相同；只提到名詞、沒有說明對對方的意義，不算講到。
+結果寫在 key_points，用編號對應，每一點都要有；note 引用逐字稿說明講了什麼，漏講的就說明可以在哪個時機帶進去。
+` : ''}
+【講錯的地方】
+逐句比對招募者說的制度內容（數字、條件、期限、職級、津貼、考核）和上面的制度資料。
+說錯、說得和資料不一致、或把要達成條件才有的東西講成一定拿得到，寫進 misstatements：
+quote 必須是招募者在逐字稿裡的原句片段（照抄，不要改寫），fact 寫制度資料的正確內容。
+資料沒寫的內容不算講錯，不要寫進 misstatements；沒有講錯就填 []。
 ` : ''}
 【完整逐字稿】
 ${convo}
@@ -537,7 +635,97 @@ ${NO_BRAND}
   "improvements": [{"point": "可以調整的地方", "why": "為什麼重要", "how": "具體怎麼做"}],
   "example_script": "一段可以直接照著講的示範話術",
   "compliance_note": "合規提醒；沒有違規就寫「本次未發現違規用語」",
-  "next_challenge": "下一次的具體挑戰"
+  "next_challenge": "下一次的具體挑戰"${sys ? `,
+  "misstatements": [{"quote": "招募者的原句片段", "fact": "制度資料的正確內容"}]${keyPoints?.length ? `,
+  "key_points": [{"n": 1, "covered": true, "note": "依逐字稿的說明"}]` : ''}` : ''}
+}`;
+}
+
+// 必講重點的檢核結果由程式對回原本的清單——只信任模型給的編號與 true/false（AI業務教練 D040）
+export function normalizeKeyPoints(list, raw) {
+  if (!list?.length || !Array.isArray(raw)) return null;
+  const got = new Map();
+  for (const x of raw) {
+    const n = Number(x?.n);
+    if (Number.isInteger(n) && n >= 1 && n <= list.length && !got.has(n)) got.set(n, x);
+  }
+  if (!got.size) return null;
+  return list.map((point, i) => {
+    const x = got.get(i + 1);
+    return { point, covered: x?.covered === true, note: typeof x?.note === 'string' ? x.note : '' };
+  });
+}
+
+// 「講錯的地方」只留得住真的出現在招募者逐字稿裡的原句（程式核對，避免模型編造招募者沒說過的話）
+const squash = s => String(s || '').replace(/[\s，。！？、,.!?「」『』"'…~～]/g, '');
+export function groundMisstatements(raw, userLines) {
+  if (!Array.isArray(raw)) return [];
+  const said = squash(userLines.join(''));
+  return raw
+    .filter(x => typeof x?.quote === 'string' && typeof x?.fact === 'string' && squash(x.quote).length >= 4 && said.includes(squash(x.quote)))
+    .slice(0, 5)
+    .map(x => ({ quote: x.quote.trim(), fact: x.fact.trim() }));
+}
+
+// ── 第二版：招募制度文件的研讀整理（上傳時做一次）──────────────────────
+export function digestPrompt(filename) {
+  return `${BASE}
+
+【任務】這是一份保險公司的業務人員招募／薪酬／晉升制度文件（檔名：${filename}）。
+請完整研讀整份文件，整理成「業務主管向招募對象說明制度」時要用的重點。
+
+【極重要】
+1. 只能寫文件裡真的有的內容，文件沒寫的一律不要補、不要用常識推測、不要拿其他公司的制度來補。
+2. 所有數字（比率、金額、月數、人數、門檻）一律照抄原文，連單位一起寫；不要換算、不要四捨五入、不要自己算出新的數字。
+3. 每一項都要寫出「要達成什麼條件才有」；文件沒寫條件就寫「文件未載明條件」。
+4. 收入項目、職級、津貼、考核要「窮舉」，不要只挑幾個代表性的。之後演練時，系統會用這份整理判斷招募者有沒有講錯。
+5. source 寫出處（第幾頁、第幾條或哪一節）。
+6. 這是公司內部資料：整理時不要加入任何評論公司好壞的字眼。
+
+【只輸出 JSON，不要任何其他文字】
+{
+  "title": "制度名稱（例如：業務人員薪酬暨晉升制度）",
+  "overview": "這份制度在講什麼、適合什麼樣的人，三句話內",
+  "income": [{"item": "收入項目", "how": "怎麼計算（原文）", "condition": "要達成的條件", "source": "出處"}],
+  "career": [{"level": "職級", "requirement": "晉升或維持的條件（原文）", "source": "出處"}],
+  "support": [{"item": "新人支持（津貼、培訓、輔導等）", "detail": "內容與條件（原文）", "source": "出處"}],
+  "assessment": [{"item": "考核項目", "detail": "標準與沒達成的結果（原文）", "source": "出處"}],
+  "costs": ["業務人員需要自行負擔的費用（文件有寫才列）"],
+  "sweet_points": ["對招募對象最有吸引力的地方（一定要對得回上面的內容）"],
+  "challenges": ["說明時要誠實講清楚的條件與挑戰"],
+  "faq": [{"q": "招募對象最可能問的問題", "a": "依文件的回答"}],
+  "compliance": ["說明這份制度時要注意的合規事項（例如不能把最高值講成保證）"],
+  "missing": ["招募對象常問、但這份文件沒有交代的事（演練時不能亂講）"]
+}`;
+}
+
+// 教練講解：使用者按了才產生，每份文件只產生一次。只送整理好的重點，不重送整份文件（省額度）。
+export function lessonPrompt(digest) {
+  return `${BASE}
+
+【任務】你是資深招募教練。下面是一份公司招募制度整理出來的重點，請把它變成「教業務主管怎麼向招募對象說明這份制度」的教學內容。
+
+【極重要】
+1. 制度事實（數字、條件、職級、期限）只能用下方資料裡有的，不得補充、推估、換算或自己算出新數字。
+2. 資料寫「文件未載明」或列在 missing 的部分，不得當成事實寫進任何話術。
+3. 說明收入時一定要連同條件一起講；最高值、最快速度只能當作「達成條件時的例子」，不能講成人人都拿得到。
+4. 話術要口語、招募對象聽得懂，不堆制度專有名詞。
+5. key_points 固定 3 點，是說明這份制度時「一定要讓對方知道」的事，每點一句話、不超過 30 字。演練結束後，系統會用這 3 點檢查有沒有講到。
+6. examples 用文件裡的數字舉 1～2 個簡單的計算例子，讓對方聽得懂收入怎麼來；文件沒有足夠數字就給空陣列。
+7. pitfalls 點出說明這份制度最容易講錯、講過頭或觸法的地方。
+
+${NO_BRAND}
+
+【制度重點】
+${JSON.stringify(digest, null, 1)}
+
+【只輸出 JSON，不要任何其他文字】
+{
+  "pitch": "60 秒的制度介紹稿，可以直接照著講，200 字以內",
+  "key_points": [{"point": "必講重點", "why": "招募對象為什麼會在意", "say": "可以怎麼講，口語一句"}],
+  "examples": [{"case": "例子的情境", "explain": "怎麼用文件裡的數字講給對方聽"}],
+  "order": ["建議的說明順序，每步一句"],
+  "pitfalls": ["常見的講錯、講過頭或不能講的話，以及為什麼"]
 }`;
 }
 

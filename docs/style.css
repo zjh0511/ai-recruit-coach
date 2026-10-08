@@ -260,3 +260,7 @@ label.inline input[type=checkbox]{width:26px;height:26px;flex:none;accent-color:
 .btn.pick.call{background:#0f766e;border-color:#14b8a6}
 .btn.pick.meet{background:var(--acc);border-color:#60a5fa}
 .btn.pick:active{filter:brightness(1.15)}
+/* 制度文件清單：刪除鈕放右上角，不跟勾選框擠在一起 */
+#d-list .pol{position:relative;padding-right:56px}
+#d-list .pol .del{position:absolute;top:10px;right:8px;background:none;border:none;color:#f87171;font-size:28.5px;padding:4px 8px}
+#d-list .pol .muted{margin:4px 0 0 34px}

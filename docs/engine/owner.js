@@ -17,6 +17,7 @@ export const KEYS = {
   apikey: PREFIX + 'apikey',
   chat: PREFIX + 'chat',
   ttsq: PREFIX + 'ttsq',
+  docconsent: PREFIX + 'docconsent',   // 第一次上傳制度文件前的保密確認（企劃書 §12.3）
 };
 
 // 有帳號功能、但目前沒有人登入時用的「無主」空間：登出後殘留的寫入不會落進任何人的資料。

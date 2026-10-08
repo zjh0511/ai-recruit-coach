@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="AI招募教練">
 <meta name="description" content="保險業務主管的招募演練工具：正式招募面談前，先跟 AI 扮演的招募對象練習，練完給五項能力評分與教練回饋。">
 <title>AI招募教練｜豪老師 Hao+</title>
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -144,6 +144,7 @@
     <button class="tile" data-fn="pain"><span class="t-ico">🎯</span><span><b>招募對象痛點分析</b><small>輸入對象背景，找出三個潛在痛點與切入方式</small></span></button>
     <button class="tile" data-fn="call"><span class="t-ico">📞</span><span><b>招募邀約電訪演練</b><small>AI 扮演招募對象接你的電話，練到約成見面</small></span></button>
     <button class="tile" data-fn="meet"><span class="t-ico">🤝</span><span><b>招募面談技巧演練</b><small>面對面聊，問出對方心裡的顧慮與動機</small></span></button>
+    <button class="tile" data-fn="system"><span class="t-ico">📋</span><span><b>公司招募制度演練</b><small>上傳公司的招募制度，練習把制度講清楚、講對</small></span></button>
     <button class="tile" data-fn="chat"><span class="t-ico">💬</span><span><b>問問招募教練</b><small>產業趨勢、事業機會、話術、新人留任都可以問</small></span></button>
     <div class="two-links">
       <button class="link" data-go="history">我的訓練紀錄</button>
@@ -217,11 +218,41 @@
   </div>
 </section>
 
+<!-- 第二版：公司招募制度文件（上傳、勾選最多 5 份）。文件只存在這支手機 -->
+<section id="s-docs" class="screen">
+  <header class="bar"><button class="back" data-go="home">‹</button><span>公司招募制度</span></header>
+  <div class="pad scroll">
+    <!-- 第一次上傳前一定要確認（企劃書 §12.3：內容會送到 Google 的 AI 服務） -->
+    <div class="card warn" id="d-consent" hidden>
+      <h4>上傳之前請先確認</h4>
+      <p>文件<b>只存在這支手機</b>，不會上傳到我們的資料庫。但 AI 研讀時，<b>文件內容會送到 Google 的 AI 服務</b>處理；
+        使用免費額度時，Google 可能會用這些內容來改善服務。</p>
+      <p>很多公司規定內部制度文件不得上傳到外部 AI，請先確認公司的規定。</p>
+      <label class="inline"><input type="checkbox" id="d-agree"> 我確認公司允許上傳，或已移除機密內容</label>
+    </div>
+    <p class="muted" id="d-lead">勾選這次要練習的制度文件（最多 5 份），例如收入制度、晉升辦法、新人津貼。</p>
+    <div id="d-list"></div>
+    <input type="file" id="f-file" accept=".pdf,.docx,.pptx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain" hidden>
+    <button class="btn" id="btn-upload">＋ 上傳制度文件</button>
+    <p class="note">支援 PDF、Word（.docx）、PowerPoint（.pptx）、純文字，單檔 18MB 以內。舊版 .doc／.ppt 請先另存新格式；
+      投影片大多是圖片的話，請另存成 PDF。很厚的手冊建議分成幾份上傳。換手機要重新上傳。</p>
+  </div>
+  <div class="foot"><button class="btn primary" id="d-next" disabled>下一步：看制度重點</button></div>
+</section>
+
+<!-- 第二版：招募制度重點（第一層不花額度；教練講解按了才產生） -->
+<section id="s-learn" class="screen">
+  <header class="bar"><button class="back" id="l-back">‹</button><span>招募制度重點</span></header>
+  <div class="pad scroll" id="l-body"></div>
+  <div class="foot"><button class="btn primary" id="l-go">看完了，設定招募對象</button></div>
+</section>
+
 <!-- 演練前：示範話術稿（GPT 版：在用戶開始練習之前，先提供示範話術稿） -->
 <section id="s-brief" class="screen">
   <header class="bar"><button class="back" data-go="home">‹</button><span id="b-title">演練前準備</span></header>
   <div class="pad scroll">
     <div class="card"><h3 id="b-name"></h3><p id="b-summary" class="muted"></p></div>
+    <button class="btn review" id="b-learn" hidden>📘 回看制度重點</button>
     <div class="card"><h4>這次的目標</h4><p id="b-obj"></p><p class="note" id="b-goal"></p></div>
     <div class="card demo" id="b-demo"></div>
     <p class="note">演練過程中 AI 只會扮演招募對象，不會教學或評分；你講得卡住時，對方會像真人一樣問你「找我什麼事？」。結束後才會給你回饋。</p>
@@ -331,6 +362,6 @@
 
 <div id="toast"></div>
 
-<script type="module" src="app.js?v=6"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>

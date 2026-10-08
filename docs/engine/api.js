@@ -2,9 +2,10 @@
 // 保留與伺服器版完全相同的呼叫介面，UI 不需要知道背後有沒有伺服器。
 // 全部運算都在使用者自己的瀏覽器完成，金鑰與文件都不離開這台裝置。
 
-import { PROVIDERS, createAdapter, scrubKey, friendlyError } from './gateway.js?v=6';
-import * as CE from './session.js?v=6';
-import * as AD from './advisor.js?v=6';
+import { PROVIDERS, createAdapter, scrubKey, friendlyError } from './gateway.js?v=8';
+import * as CE from './session.js?v=8';
+import * as AD from './advisor.js?v=8';
+import * as KB from './knowledge.js?v=8';
 
 let gw = null;                 // 目前登入的模型連線
 let current = { provider: null, key: null };
@@ -78,13 +79,34 @@ export async function api(path, body = {}) {
         return await AD.painPoints(need(), body);
 
       // 功能二／三：招募邀約電訪、招募面談（角色扮演）
-      case '/session/start':
+      case '/session/start': {
         if (!body.background?.trim()) throw new Error('請描述一下招募對象的背景');
+        const mode = ['call', 'meet', 'system'].includes(body.mode) ? body.mode : 'call';
+        const docs = [];
+        if (mode === 'system') {
+          for (const id of (body.docIds || []).slice(0, KB.MAX_PICK)) { const d = await KB.getDoc(id); if (d) docs.push(d); }
+          if (!docs.length) throw new Error('請先選擇制度文件');
+        }
         return await CE.startSession(need(), {
-          mode: body.mode === 'meet' ? 'meet' : 'call', gender: body.gender, age: body.age,
+          mode, gender: body.gender, age: body.age, docs,
           background: body.background.slice(0, 1000), difficulty: Number(body.difficulty) || 1,
           context: body.context || 'warm', contextNote: (body.contextNote || '').slice(0, 300),
         });
+      }
+
+      // 第二版：公司招募制度文件（只存在這支手機）
+      case '/doc/list': return { docs: await KB.listDocs() };
+      case '/doc/upload':
+        if (!body.name || !body.base64) throw new Error('沒有收到檔案');
+        return await KB.ingest(need(), body);
+      case '/doc/delete': await KB.deleteDoc(body.id); return { ok: true };
+      case '/doc/lesson': {
+        const ids = (body.ids || []).slice(0, KB.MAX_PICK);
+        if (!ids.length) throw new Error('請先選擇制度文件');
+        return await KB.lessonView(ids);
+      }
+      case '/doc/seen': await KB.markSeen((body.ids || []).slice(0, KB.MAX_PICK)); return { ok: true };
+      case '/doc/coach': return await KB.coachLesson(need(), body.id);
       case '/session/begin': return CE.beginRoleplay(session(body));
       case '/session/turn':
         if (!body.text?.trim()) throw new Error('請輸入內容');

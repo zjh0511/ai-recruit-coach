@@ -110,7 +110,7 @@ try {
   await snap('welcome');
   await click('#btn-welcome');
   await waitFor(on('home'));
-  ok(await js(`document.querySelectorAll('#s-home .tile[data-fn]').length === 4`), '首頁有四個功能');
+  ok(await js(`document.querySelectorAll('#s-home .tile[data-fn]').length === 5`), '首頁有五個功能（第二版加上公司招募制度演練）');
   await waitFor(`document.querySelector('#acct-fast').textContent.includes('gemini')`, 20000, '模型設定顯示目前模型');
   await snap('home');
 
@@ -191,6 +191,61 @@ try {
   console.log('      面談結果：' + await js(`document.querySelector('#fb-body .outcome .big').textContent`));
   await snap('feedback-meet');
 
+  console.log('\n=== 第二版：公司招募制度演練 ===');
+  await js(`document.querySelector('#s-fb .back').click()`);
+  await waitFor(on('home'));
+  await click('[data-fn="system"]');
+  await waitFor(on('docs'));
+  ok(await js(`!document.querySelector('#d-consent').hidden && document.querySelector('#d-next').disabled`), '第一次進來：先看到保密提醒，還沒選文件不能下一步');
+  await click('#btn-upload');
+  ok(await js(`document.querySelector('#toast').textContent.includes('勾選確認')`), '沒勾保密確認就按上傳 → 擋下來');
+  await js(`document.querySelector('#d-agree').click()`);
+  await js(`(HTMLInputElement.prototype.click = function () {}, true)`);     // 無頭瀏覽器沒有檔案選擇視窗
+  await click('#btn-upload');
+  ok(await js(`document.querySelector('#d-consent').hidden`), '勾選確認後提醒收起來，下次不再出現');
+  const FIX = path.join(ROOT, 'tools', 'fixtures');
+  for (const f of ['收入制度（虛構）.docx', '晉升考核辦法（虛構）.pdf']) {
+    const n0 = await js(`document.querySelectorAll('#d-list .pol').length`);
+    const { result: { root } } = await send('DOM.getDocument', { depth: 1 });
+    const { result: { nodeId } } = await send('DOM.querySelector', { nodeId: root.nodeId, selector: '#f-file' });
+    await send('DOM.setFileInputFiles', { nodeId, files: [path.join(FIX, f)] });
+    await waitFor(`document.querySelectorAll('#d-list .pol').length > ${n0} && document.querySelector('#s-docs.on')`, 180000, '研讀 ' + f);
+  }
+  ok(await js(`document.querySelectorAll('#d-list .pol input:checked').length === 2`), '上傳的兩份文件自動勾起來');
+  ok(await js(`document.querySelector('#d-next').textContent.includes('已選 2 份')`), '下一步按鈕顯示已選 2 份');
+  await snap('docs');
+  await click('#d-next');
+  await waitFor(on('learn'), 30000, '制度重點頁');
+  ok(await js(`document.querySelector('#l-body').innerText.includes('演練時要講到的重點') && document.querySelector('#l-body').innerText.includes('收入結構')`), '制度重點頁：必講重點與收入結構');
+  ok(await js(`document.querySelector('#l-body').innerText.includes('這份是 PDF')`), 'PDF 提醒要對照原文核對數字');
+  await snap('learn');
+  await js(`[...document.querySelectorAll('#l-body .btn')].find(b => b.textContent === '產生教練講解').click()`);
+  await waitFor(`document.querySelector('#l-body').innerText.includes('60 秒制度介紹稿')`, 90000, '教練講解');
+  ok(true, '按了才產生教練講解');
+  await snap('learn-coach');
+  await click('#l-go');
+  await waitFor(on('intake'));
+  await js(`[...document.querySelectorAll('#f-sample .chip')].find(c => c.textContent === '社會新鮮人').click()`);
+  await click('#btn-go');
+  await waitFor(on('brief'), 90000, '制度示範話術稿');
+  ok(await js(`!document.querySelector('#b-learn').hidden && document.querySelectorAll('#b-demo .step-t').length >= 6`), '制度示範話術稿＋可以回看制度重點');
+  ok(await js(`document.querySelector('#btn-start').textContent.includes('📋 制度')`), '開始按鈕標明是制度演練');
+  await snap('brief-system');
+  await click('#btn-start');
+  await waitFor(`document.querySelectorAll('#p-log .msg.customer').length >= 1`, 30000);
+  ok(await js(`document.querySelector('#p-name').textContent.startsWith('📋 制度｜')`), '演練畫面左上角標明是制度演練');
+  for (const t of ['今天想跟你說明我們公司的制度，你最想先了解哪一塊？',
+    '新人前 12 個月，每個月有 25,000 元的新人津貼，條件是當月 FYC 達到 20,000 元。',
+    '晉升業務主任要到職滿 6 個月，最近 6 個月累計 FYC 達 300,000 元，而且要增員 2 人。']) {
+    if (await js(`!!document.querySelector('#s-wait.on, #s-fb.on')`)) break;
+    await say(t);
+  }
+  if (!await js(`!!document.querySelector('#s-wait.on, #s-fb.on')`)) await click('#btn-end');
+  await waitFor(on('fb'), 90000, '制度演練評分');
+  ok(await js(`document.querySelector('#fb-body').innerText.includes('必講重點（講到')`), '回饋：必講重點逐點檢查');
+  ok(await js(`/制度內容講得正確|和制度文件不一樣的說法/.test(document.querySelector('#fb-body').innerText)`), '回饋：對照制度文件檢查說法');
+  await snap('feedback-system');
+
   console.log('\n=== 功能四：問問招募教練 ===');
   await js(`document.querySelector('#s-fb .back').click()`);
   await waitFor(on('home'));
@@ -207,7 +262,7 @@ try {
   await waitFor(on('home'));
   await js(`document.querySelector('[data-go="history"]').click()`);
   await waitFor(on('history'));
-  ok(await js(`document.querySelector('#h-body').innerText.includes('共 2 次演練')`), '兩次演練都記在紀錄裡');
+  ok(await js(`document.querySelector('#h-body').innerText.includes('共 3 次演練')`), '三次演練都記在紀錄裡');
   await snap('history');
 
   ok(!errors.length, '整段沒有任何程式錯誤', errors.slice(0, 3).join(' | '));
