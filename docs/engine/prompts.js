@@ -6,7 +6,7 @@
 //   模型只負責講話，以及回報簡單的訊號（編號、true/false）。
 
 export const BASE = `你是「AI招募教練」的對話引擎，服務對象是台灣保險業的業務主管，以及準備晉升、開始做增員招募的業務夥伴，用途只有訓練。
-一律使用台灣繁體中文與自然口語，不使用簡體字、不使用中國用語。
+一律使用台灣繁體中文與自然口語，不使用簡體字、不使用中國用語，也不得夾雜韓文、日文等其他語言的文字。
 你不提供法律、稅務、醫療或財務建議。
 
 【資料誠實】
@@ -355,6 +355,19 @@ const modeRule = (mode, difficulty) => {
   return Number(difficulty) <= 2 ? r.easy : r.hard;
 };
 
+// 電訪的場景鎖（R013）：豪老師實測時，電訪演練聊著聊著變成當面聊天。
+// 電話裡只能談到「約見面」為止，不能演出見面之後的場景。
+const PHONE_LOCK = `【這是一通電話——整段都在電話裡】
+・你們只是在講電話，沒有見面，你看不到對方，對方也看不到你。
+・不要描述見面的場景，不要說「請坐」「你今天約我出來」「這杯咖啡」「見到你」這類只有當面才會講的話。
+・對方約你見面，你最多只能「答應之後找時間見面」或拒絕；見面是之後的事，不會在這通電話裡發生。
+・如果對方講得好像你們已經坐在一起，你會覺得奇怪，例如「蛤？我們現在是在講電話吧？」。
+`;
+
+// 程式檢查：電訪時對方的回話若出現只有當面才會講的話，退回重產生
+const FACE_TO_FACE = /請坐|坐(下來|吧|這邊|這裡)|(今天|特地)(約我|找我)出來|謝謝你(今天)?(出來|過來)|見到你(真|很|好)|看到你(本人|真|很|好)|這杯咖啡|點(個)?餐|服務生|我們(現在)?坐在/;
+export const phoneDrift = say => typeof say === 'string' && FACE_TO_FACE.test(say);
+
 export function roleplaySystem(p, mode = 'call', context = 'warm') {
   const C = contextOf(context);
   const D = difficultyOf(p.difficulty);
@@ -385,7 +398,7 @@ ${(p.motives || []).map((h, i) => `  ${i + 1}. ${h}`).join('\n')}
 你最可能講出口的拒絕：${(p.objections || []).join('；')}
 
 【本模式規則】${modeRule(mode, p.difficulty)}
-
+${mode === 'call' ? PHONE_LOCK : ''}
 【本次難度：${D.label}】${D.desc}
 ${D.rules}
 ${D.canEnd ? '' : '【重要】這一級你不會主動結束談話。\n'}
@@ -416,7 +429,7 @@ declined：你是不是已經決定婉拒、結束這次談話？是就填 true�
 {"say":"你要說的話","trust_delta":0,"guiding":false,"revealed_concerns":[],"revealed_motives":[],"commit":"none","declined":false}`;
 }
 
-export function roleplayTurn({ history, userText, trust, guidance, maxGuidance, mustDecline = false, gentle = false, notYet = null }) {
+export function roleplayTurn({ history, userText, trust, guidance, maxGuidance, mustDecline = false, gentle = false, notYet = null, mode = 'call' }) {
   const convo = history.map(t => `${t.speaker === 'user' ? '對方' : '你'}：${t.text}`).join('\n');
   let extra = '';
   if (mustDecline) {
@@ -441,7 +454,7 @@ ${convo || '（對話剛開始）'}
 【對方剛剛說】
 ${userText}${extra}
 
-依你的人設與絕對規則回應，只輸出 JSON。`;
+${mode === 'call' ? '（提醒：你們現在是在講電話，沒有見面。）\n' : ''}依你的人設與絕對規則回應，只輸出 JSON。`;
 }
 
 // ── 評分與教練回饋（Judge）──────────────────────────────────────────

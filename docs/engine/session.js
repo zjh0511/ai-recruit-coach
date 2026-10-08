@@ -147,19 +147,26 @@ export async function handleTurn(gw, s, userText) {
   const turn = P.roleplayTurn({
     history: s.history.filter(h => h.speaker !== 'system').slice(-14),
     userText: text, trust: s.trust, guidance: s.guidance, maxGuidance: s.maxGuidance,
-    mustDecline, gentle,
+    mustDecline, gentle, mode: s.mode,
     // 程式不會認可的答應，也不要讓對方嘴上答應（否則畫面結果和對話對不起來）
     notYet: userTurns < MIN_TURNS[s.mode] ? 'early' : s.trust < COMMIT_TRUST ? 'trust' : null,
   });
 
-  let say = null, data = {}, ms = 0;
-  for (let attempt = 0; attempt < 2 && !say; attempt++) {
-    const r = await gw.generate(attempt === 0 ? turn : turn + '\n\n【重要】上一次你跳出了角色。請只用招募對象本人的口吻回答。', {
+  // 退回重產生時要具體說出錯在哪（AI業務教練 §4.1：籠統的「請修正」沒用）
+  let say = null, data = {}, ms = 0, fix = '';
+  for (let attempt = 0; attempt < 3 && !say; attempt++) {
+    const r = await gw.generate(turn + fix, {
       system: sys, json: true, temp: attempt === 0 ? 0.9 : 0.6, max: 1200, tier: 'fast', noThink: true,
     });
     ms += r.ms;
     data = parseJson(r.text) || {};
     say = P.validateRoleplay(data.say);
+    if (say && s.mode === 'call' && P.phoneDrift(say)) {
+      // 電訪變成當面聊天（R013）
+      console.warn('[roleplay] 電訪變成當面聊天，重新產生');
+      say = null;
+      fix = '\n\n【重要】上一次你講得好像你們已經見面、坐在一起了。你們現在是在講電話，沒有見面。請用講電話的口吻重新回答。';
+    } else if (!say) fix = '\n\n【重要】上一次你跳出了角色。請只用招募對象本人的口吻回答。';
   }
   if (!say) say = mustDecline ? '不好意思，我覺得我現在應該沒有這個打算，我們改天再聊好嗎？' : '嗯……所以你是想跟我說什麼？';
 

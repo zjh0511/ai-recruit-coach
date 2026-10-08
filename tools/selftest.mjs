@@ -247,7 +247,41 @@ if (section(2, '演練規則（假的模型，不用金鑰）')) {
     const gw = fakeGw([PERSONA, turn({ say: '身為AI我建議你多練習' })]);
     const [, s] = await newSession(gw);
     const r = await CE.handleTurn(gw, s, '我想約你聊聊工作');
-    ok(gw.calls.length === 3 && r.text === '嗯……所以你是想跟我說什麼？', '連續跳出角色兩次 → 改用安全的固定回應');
+    ok(gw.calls.length === 4 && r.text === '嗯……所以你是想跟我說什麼？', '連續跳出角色三次 → 改用安全的固定回應');
+  }
+
+  // ── R013：電訪不能變成當面聊天 ──
+  {
+    const gw = fakeGw([PERSONA, turn({ say: '請坐請坐，今天怎麼有空約我出來？' }), turn({ say: '喂，你說，我在聽。' })]);
+    const [, s] = await newSession(gw);
+    const r = await CE.handleTurn(gw, s, '我想跟你聊聊我現在的工作');
+    ok(r.text === '喂，你說，我在聽。' && /你們現在是在講電話/.test(gw.calls.at(-1).text), '電訪：對方講出當面才會說的話 → 具體指出「在講電話」並重產生');
+    ok(/這是一通電話/.test(gw.calls.at(-1).opts.system) && /提醒：你們現在是在講電話/.test(gw.calls.at(-1).text), '電訪：系統規則與每一回合都提醒「在講電話」');
+    ok(P.phoneDrift('這杯咖啡我請') && !P.phoneDrift('好，那週六約在咖啡廳喝杯咖啡'), '約「之後」喝咖啡不算偏離，「這杯咖啡」才算');
+  }
+  {
+    const gw = fakeGw([PERSONA, turn({ say: '請坐，喝點什麼？' })]);
+    const [, s] = await newSession(gw, { mode: 'meet' });
+    const r = await CE.handleTurn(gw, s, '謝謝你今天出來');
+    ok(r.text === '請坐，喝點什麼？' && !/這是一通電話/.test(gw.calls.at(-1).opts.system), '面談本來就是當面，不受電訪的場景鎖影響');
+  }
+
+  // ── R013：外文字保險絲（實測出現過韓文「가정」）──
+  {
+    const { GeminiAdapter, FOREIGN } = await import('../docs/engine/gateway.js');
+    const mk = outs => {
+      const a = new GeminiAdapter('test');
+      a.fastList = ['m']; a.judgeList = ['m']; a.calls = 0;
+      a._call = async () => ({ text: outs[Math.min(a.calls++, outs.length - 1)], ms: 1, model: 'm' });
+      return a;
+    };
+    const a1 = mk(['避免探問對方的經濟狀況或가정 財務隱私', '避免探問對方的經濟狀況或家庭財務隱私']);
+    const r1 = await a1.generate('x');
+    ok(a1.calls === 2 && r1.text.includes('家庭財務'), '輸出夾雜韓文 → 自動重新產生');
+    const a2 = mk(['或가정 財務隱私']);
+    const r2 = await a2.generate('x');
+    ok(a2.calls === 3 && !FOREIGN.test(r2.text) && r2.text === '或財務隱私', '連續三次都有 → 刪掉外文字，不出現在畫面上', r2.text);
+    ok(!FOREIGN.test('男聲・沉穩'), '「・」不會被當成日文');
   }
 
   // ── 評分：分數由程式規範化 ──
@@ -338,6 +372,12 @@ if (live && section(4, '招募邀約電訪演練（Gemini）')) {
   ok(scored(fb) && fb.scores.professionalism.score <= 2.5, `五項評分在範圍內，違規後專業度 ≤ 2.5（評分 ${ems}ms）`);
   ok(fb.violations.length >= 1 && fb.positives.length && fb.improvements.length, '回饋有讚美、可調整處與違規點名');
   console.log(`      結果：${fb.outcome.label}｜${say.length} 句｜平均每回合 ${Math.round(rs.reduce((a, r) => a + (r.ms || 0), 0) / Math.max(1, say.length))}ms`);
+
+  // R013：招募者講得好像已經見面，對方也要維持在電話裡
+  const ph = await play('call', P.SAMPLES.find(s => s.key === 'owner'), [
+    '嗨，好久不見，我是阿豪！最近好嗎？', '謝謝你今天出來跟我喝咖啡，這家店不錯吧？', '你最近早餐店生意還好嗎？', '我現在在保險業，想約你找一天見面聊聊我的工作。']);
+  const phSay = ph.rs.filter(r => r.type === 'candidate').map(r => r.text);
+  ok(!phSay.some(P.phoneDrift), `電訪全程維持在電話裡（${phSay.length} 句）`, phSay.join(' / '));
 
   const st = await play('call', P.SAMPLES.find(s => s.key === 'teacher'), ['喂', '嗯', '那個', '呃', '嗯嗯', '喔', '欸'], { difficulty: 2 });
   ok(st.rs.at(-1).ended && st.fb.outcome.tier === 0, `一直講不清楚 → 對方引導後婉拒（第 ${st.rs.length} 句結束）`);

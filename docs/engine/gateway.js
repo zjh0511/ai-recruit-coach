@@ -3,6 +3,12 @@
 
 import { toTW } from './zhtw.js';
 
+// 韓文（諺文）、日文假名：這個 App 的輸出只該有中文、英文與數字。
+// 假名範圍刻意避開「・」（U+30FB）：提示詞與條列常用它，不能當成外文字。
+export const FOREIGN = /[ᄀ-ᇿ㄰-㆏가-힯ぁ-ゖァ-ヺ]/;
+export const stripForeign = s => s.replace(new RegExp(FOREIGN.source, 'g'), '')
+  .replace(/([一-鿿])[ \t]+(?=[一-鿿])/g, '$1').replace(/[ \t]{2,}/g, ' ');
+
 // ── 供應商清單（給前端選單用）──────────────────────────────────
 export const PROVIDERS = {
   gemini: {
@@ -239,6 +245,12 @@ class Base {
           // （第一版寫成 toTW(await this._call(...))，型別不符就整包原樣回傳，
           //   轉換靜默失效——這種錯不會拋例外，只會讓簡體字繼續出現。）
           if (typeof r?.text === 'string') r.text = toTW(r.text);
+          // 外文字的保險絲（R013）：實測 flash-lite 在痛點分析裡冒出韓文「가정」（家庭）。
+          // 同一個模型再產生一次通常就正常；三次都有的話，把外文字刪掉，不讓它出現在畫面上或被唸出來。
+          if (typeof r?.text === 'string' && FOREIGN.test(r.text)) {
+            if (attempt < 2) { console.warn(`[gateway] ${model} 輸出夾雜外文字，重新產生`); last = new Error('foreign script'); continue; }
+            r.text = stripForeign(r.text);
+          }
           // 不是第一順位卻成功 → 告訴使用者現在正在用備援模型
           if (model !== list[0]) this.onEvent?.({ type: 'fallback', from: list[0], to: model });
           return r;
