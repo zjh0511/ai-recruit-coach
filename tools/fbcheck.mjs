@@ -1,4 +1,4 @@
-// 帳號同步的端到端檢查：註冊 → 寫入 → 讀回 → 合併 → **安全規則隔離** → 刪除測試帳號。
+// 帳號同步的端到端檢查：註冊 → 寫入 → 讀回 → 合併 → **安全規則隔離** → 兩個 App 互不影響 → 刪除測試帳號。
 //
 // 為什麼需要這支：安全規則改壞了不會有任何錯誤訊息，只會變成
 // 「所有人都看得到彼此的訓練紀錄」。這種 bug 只有主動去撞才發現得到。
@@ -55,15 +55,25 @@ try {
   // 這一節是這支腳本存在的理由
   console.log('\n=== 安全規則：能不能偷看別人的資料 ===');
   const g = (p, o) => fetch(`${DB}${p}`, o).then(r => r.status);
-  ok(await g(`/users/somebody-elses-uid.json?auth=${idToken}`) === 401, '讀別人的資料被拒');
-  ok(await g(`/users/somebody-elses-uid.json?auth=${idToken}`, { method: 'PUT', body: '"hack"' }) === 401, '寫別人的資料被拒');
+  ok(await g(`/recruit/somebody-elses-uid.json?auth=${idToken}`) === 401, '讀別人的招募教練資料被拒');
+  ok(await g(`/recruit/somebody-elses-uid.json?auth=${idToken}`, { method: 'PUT', body: '"hack"' }) === 401, '寫別人的招募教練資料被拒');
+  ok(await g(`/recruit.json?auth=${idToken}`) === 401, '列出所有人的招募教練資料被拒');
+  ok(await g(`/users/somebody-elses-uid.json?auth=${idToken}`) === 401, '讀別人的 AI業務教練資料被拒（共用專案，規則不能被改壞）');
   ok(await g(`/.json?auth=${idToken}`) === 401, '讀整個資料庫被拒');
-  ok(await g(`/users/${uid}.json`) === 401, '未登入讀我的資料被拒');
+  ok(await g(`/recruit/${uid}.json`) === 401, '未登入讀我的資料被拒');
+
+  // 兩個 App 共用帳號：招募教練寫入不能動到 AI業務教練那一份（R002）
+  console.log('\n=== 兩個 App 的資料互不影響 ===');
+  ok(await g(`/users/${uid}.json?auth=${idToken}`, { method: 'PUT', body: '{"history":[{"at":1}]}' }) === 200, '同一個帳號也能寫 AI業務教練那一份');
+  ok(await acct.push({ history: [], prefs: {} }), '招募教練整份覆寫自己的資料');
+  const sales = await fetch(`${DB}/users/${uid}.json?auth=${idToken}`).then(r => r.json());
+  ok(sales?.history?.length === 1, 'AI業務教練那一份沒有被蓋掉');
 } catch (e) {
   fail++;
   console.log(' FAIL  例外：' + e.message);
 } finally {
   if (idToken) {
+    await fetch(`${DB}/recruit/${uid}.json?auth=${idToken}`, { method: 'DELETE' }).catch(() => {});
     await fetch(`${DB}/users/${uid}.json?auth=${idToken}`, { method: 'DELETE' }).catch(() => {});
     const d = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${FB.apiKey}`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
