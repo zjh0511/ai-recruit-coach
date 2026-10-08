@@ -1,0 +1,43 @@
+# ⚠️ 金鑰：絕對不可進版控
+API Key.txt
+Gemini API Key.txt
+*API Key*.txt
+*Key*.txt
+*api_key*
+*.key
+.env
+.env.*
+key.txt
+
+# 原始 Custom GPT 的完整指令（文件內自載明「嚴禁透漏」，故不進版控）
+# 其內容會重新工程化為 docs/engine/prompts.js
+AI招募教練_提示詞.txt
+# GPT 開場畫面截圖：只是開發參考
+*.bmp
+
+# 本機產生物
+certs/
+node_modules/
+*.log
+.claude/
+
+# 公司內部教材（如需分享請另行確認可公開性）
+*.pptx
+*.ppt
+*.docx
+*.doc
+*.pdf
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 報表含同事的演練評分與教練回饋，是個人表現資料，絕不進公開 repo
+報表/
+*.csv
+
+# Firebase 服務帳戶金鑰：洩漏等於整個專案的資料外洩
+*serviceAccount*.json
+*service-account*.json
+sa-key*.json

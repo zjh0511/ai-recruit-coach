@@ -1,0 +1,101 @@
+// 本地 API 層 —— 取代原本的伺服器。
+// 保留與伺服器版完全相同的呼叫介面，UI 不需要知道背後有沒有伺服器。
+// 全部運算都在使用者自己的瀏覽器完成，金鑰與文件都不離開這台裝置。
+
+import { PROVIDERS, createAdapter, scrubKey, friendlyError } from './gateway.js';
+
+let gw = null;                 // 目前登入的模型連線
+let current = { provider: null, key: null };
+let onEvent = null;            // 降階／額度事件通知 UI
+
+// 開放給使用者選的服務商。引擎仍支援六家（gateway.js），
+// 但目前只開放 Google AI Studio（使用者決定）。要恢復其他家，把代號加回這裡即可。
+export const ENABLED = ['gemini'];
+export const providers = () => Object.fromEntries(
+  Object.entries(PROVIDERS).filter(([k]) => ENABLED.includes(k)));
+export const onModelEvent = fn => { onEvent = fn; if (gw) gw.onEvent = fn; };
+
+function need() {
+  if (!gw) { const e = new Error('尚未設定 API 金鑰，請重新登入'); e.auth = true; throw e; }
+  return gw;
+}
+
+async function connect(provider, key) {
+  if (!ENABLED.includes(provider)) {
+    const e = new Error('目前只支援 Google AI Studio 的 API 金鑰');
+    e.auth = true;
+    throw e;
+  }
+  const a = createAdapter(provider, key);
+  try {
+    await a.init();                                  // 探測可用模型，順便驗證金鑰
+  } catch (err) {
+    const raw = scrubKey(err.message, key);
+    const e = new Error(friendlyError(raw, provider) || `無法連線：${raw.slice(0, 160)}`);
+    e.auth = true;
+    throw e;
+  }
+  a.onEvent = onEvent;
+  gw = a;
+  current = { provider, key };
+  return a;
+}
+
+// 重新整理頁面後用已存的金鑰靜默恢復連線
+export async function restore(provider, key, pin) {
+  if (!provider || !key) return false;
+  try {
+    const a = await connect(provider, key);
+    if (pin) a.pin(pin);
+    return true;
+  } catch { return false; }
+}
+
+export const isReady = () => !!gw;
+
+// 登出或換人登入時放掉記憶體裡的連線——金鑰清掉了，連線卻還拿著舊的，下一位就能直接用前一位的額度
+export function disconnect() { gw = null; current = { provider: null, key: null }; }
+
+// ── 路由（與伺服器版同名，方便日後再切回伺服器架構）──────────────
+export async function api(path, body = {}) {
+  try {
+    switch (path) {
+      case '/login': {
+        const a = await connect(body.provider, body.key);
+        if (body.pin) a.pin(body.pin);          // 沿用上次選定的模型
+        return { ok: true, provider: body.provider, fast: a.fast, judge: a.judge, file: a.supportsFile };
+      }
+
+      // 模型清單與指定（不指定就維持自動）
+      case '/models/status': return need().status();
+      case '/models/set': return need().pin(body.model || null);
+
+      // 三大演練與問問招募教練：依開發階段逐一接上（企劃書 §5）
+
+      default:
+        throw new Error('unknown_endpoint');
+    }
+  } catch (e) {
+    if (e.auth) throw e;
+    const raw = scrubKey(e.message, current.key);
+    const friendly = friendlyError(raw, current.provider);
+
+    if (friendly) {
+      console.error(`[api] ${path} → ${friendly}`);
+      // 只有「金鑰無效／沒權限」才該退回登入畫面；
+      // 餘額不足、限流、逾時都不是金鑰問題，把人踢回登入只會讓他更困惑
+      if (/金鑰無效|沒有使用權限|是否已開通/.test(friendly)) {
+        const err = new Error(friendly); err.auth = true; throw err;
+      }
+      throw new Error(friendly);
+    }
+
+    // 我們自己丟出的操作提示，原文就是給使用者看的
+    if (/請先|沒有收到|未指定|請描述|請輸入|超過上限|讀不到|解析失敗|產生失敗|不支援|逾時，請重新開始/.test(raw)) {
+      throw new Error(raw);
+    }
+
+    console.error(`[api] ${path} → ${raw.slice(0, 200)}`);
+    throw new Error('剛剛好像卡了一下，請再試一次。');
+  }
+}

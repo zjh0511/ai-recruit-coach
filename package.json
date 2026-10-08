@@ -1,0 +1,12 @@
+{
+  "name": "ai-recruit-coach",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI招募教練 — 豪老師 Hao+（純前端，無伺服器）",
+  "scripts": {
+    "cert": "node tools/gencert.mjs",
+    "start": "node tools/serve.mjs",
+    "check": "node tools/selftest.mjs"
+  }
+}

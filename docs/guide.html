@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Google AI Studio 免費 API Key 申請教學｜AI招募教練</title>
+<link rel="stylesheet" href="style.css">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<style>
+  body{overflow:auto}
+  .page{max-width:720px;margin:0 auto;padding:20px 20px calc(40px + env(safe-area-inset-bottom));
+    padding-top:calc(20px + env(safe-area-inset-top))}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
+  .step > .n{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+    border-radius:50%;background:var(--acc);color:#fff;font-weight:700;font-size:21px;margin-right:8px}
+  .step h3{display:inline;font-size:25.5px;vertical-align:middle}
+  .step p,.step ul{margin:10px 0 0}
+  .step .do{background:#0f1a2e;border-left:3px solid var(--acc);padding:10px 12px;border-radius:8px;margin-top:10px}
+  .step .warn{background:#1c1809;border-left:3px solid var(--warn);padding:10px 12px;border-radius:8px;margin-top:10px}
+  .big{display:block;text-align:center;background:var(--acc);color:#fff;border-radius:12px;
+    padding:15px;font-weight:600;text-decoration:none;margin:16px 0}
+  .faq{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}
+  .faq b{color:var(--fg)}
+  code{background:#0b1220;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:19.5px}
+  .back-link{display:inline-block;margin-bottom:6px;color:var(--acc);text-decoration:none}
+  .shot{display:block;width:100%;max-width:340px;height:auto;margin:14px auto 0;border-radius:14px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="page">
+  <a class="back-link" href="./">‹ 回到 AI招募教練</a>
+  <h1 style="font-size:36px;margin:6px 0 4px">Google AI Studio 免費 API Key 申請教學</h1>
+  <p class="muted">全程免費、不需要信用卡，大約 3 分鐘。</p>
+
+  <div class="card warn">
+    <p style="margin:0"><b>為什麼要自己申請？</b></p>
+    <p style="margin:6px 0 0">因為 AI 用量是算在金鑰持有人的帳號上。每個人用自己的金鑰，
+    額度就不會互相搶，你的練習內容也只會經過你自己的帳號。</p>
+  </div>
+
+  <div class="card sm">
+    <p style="margin:0"><b>已經在用 AI業務教練？</b>直接用同一把金鑰就好，不用再申請。
+    要注意的是：兩個 App 用同一把金鑰，免費額度（尤其是真人語音）是<b>兩邊合計</b>的。</p>
+  </div>
+
+  <!-- 步驟截圖是使用者在 iPhone 上實際操作的畫面（2026-09-30，沿用自 AI業務教練）。
+       第 1、5、8、9 張拍到的是 AI業務教練的畫面，等 AI招募教練的畫面定稿後重拍。
+       第 7 張的金鑰與專案編號已遮蔽——這個網站是公開的。 -->
+  <div class="step">
+    <span class="n">1</span><h3>按「🔑 前往申請金鑰」</h3>
+    <p>在 AI招募教練的登入畫面，找到「還沒有金鑰？」，按<b>前往申請金鑰</b>。
+    會先請你<b>選擇 Google 帳號</b>，選好後進入 Google AI Studio，不需要另外註冊。</p>
+    <img class="shot" src="help/key-1.jpg" alt="登入畫面的「前往申請金鑰」按鈕" width="600" height="1030" loading="lazy">
+    <a class="big" href="https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Faistudio.google.com%2Fapikey" target="_blank" rel="noopener">或直接開啟 Google AI Studio →</a>
+    <!-- 直接開 AI Studio 會默默用瀏覽器預設的 Google 帳號（2026-10-07 使用者實測：手機登入兩個帳號，申請到的是第一個的金鑰） -->
+    <div class="warn"><b>請選你自己的 Google 帳號。</b>手機上登入了好幾個 Google 帳號時（例如家人或同事的），
+    選錯帳號拿到的就是別人的金鑰，用的也是別人的免費額度。進入 AI Studio 後，打開左上角選單，最下方會顯示目前的帳號。</div>
+    <div class="warn">公司或學校的帳號有時會被管理員停用這項服務，那就改用個人的 Gmail。</div>
+  </div>
+
+  <div class="step">
+    <span class="n">2</span><h3>第一次使用：勾選同意</h3>
+    <p>第一次進 AI Studio 會出現歡迎視窗，<b>勾選下方的方框</b>（同意使用條款）。</p>
+    <img class="shot" src="help/key-2.jpg" alt="AI Studio 歡迎視窗，勾選同意條款" width="600" height="1082" loading="lazy">
+  </div>
+
+  <div class="step">
+    <span class="n">3</span><h3>按「Continue」</h3>
+    <p>勾好之後，右下角的 <b>Continue</b> 才按得下去。</p>
+    <img class="shot" src="help/key-3.jpg" alt="勾選後按 Continue" width="600" height="1108" loading="lazy">
+    <div class="do">之前用過 AI Studio 的人不會看到這兩步，直接跳到第 4 步。</div>
+  </div>
+
+  <div class="step">
+    <span class="n">4</span><h3>按右上角「Create API key」</h3>
+    <p>頁面標題是 <code>API Keys</code>。按右上角的 <b>Create API key</b>（中文介面是「建立 API 金鑰」）。</p>
+    <img class="shot" src="help/key-4.jpg" alt="API Keys 頁面右上角的 Create API key" width="600" height="1086" loading="lazy">
+  </div>
+
+  <div class="step">
+    <span class="n">5</span><h3>幫金鑰取個名字</h3>
+    <p>在 <b>Name your key</b> 輸入一個認得出來的名字，例如「<b>AI招募教練</b>」（截圖是另一個 App 的例子，名字自己取就好）。
+    下面的專案維持預設的 <code>Default Gemini Project</code> 就好。</p>
+    <img class="shot" src="help/key-5.jpg" alt="Name your key 輸入金鑰名稱" width="600" height="1096" loading="lazy">
+  </div>
+
+  <div class="step">
+    <span class="n">6</span><h3>按「Create key」</h3>
+    <p>名字填好之後按 <b>Create key</b>。不需要開通付費、不需要綁信用卡。</p>
+    <img class="shot" src="help/key-6.jpg" alt="按 Create key 建立金鑰" width="600" height="1102" loading="lazy">
+  </div>
+
+  <div class="step">
+    <span class="n">7</span><h3>按複製圖示，複製金鑰</h3>
+    <p>建立好會出現 <b>API key details</b>。按 <b>API Key</b> 那一行最右邊的<b>複製圖示</b>，
+    整串金鑰就複製好了（截圖裡的金鑰已遮蔽）。</p>
+    <img class="shot" src="help/key-7.jpg" alt="API key details，按 API Key 旁的複製圖示" width="600" height="1088" loading="lazy">
+    <div class="warn">
+      請按<b>複製圖示</b>，不要自己用手選取——畫面上的金鑰太長會被截斷，自己選很容易漏字。<br>
+      金鑰的開頭不一定是 <code>AIza</code>——Google 已改用新的格式（例如 <code>AQ.</code> 開頭），看起來不一樣是正常的。
+    </div>
+    <div class="do">複製好之後按左上角的 <b>✕</b> 關掉這一頁，就會回到 AI招募教練。
+    這串金鑰之後回到同一個頁面還看得到，不用特別存起來。</div>
+  </div>
+
+  <div class="step">
+    <span class="n">8</span><h3>回到 App，貼上金鑰</h3>
+    <p>在「<b>貼上你的 Google AI Studio API 金鑰</b>」的框框裡點一下，選「貼上」。
+    金鑰會顯示成一排圓點，這是正常的；想確認的話可以勾「顯示金鑰」。</p>
+    <img class="shot" src="help/key-8.jpg" alt="在 App 的輸入框貼上金鑰" width="600" height="1232" loading="lazy">
+  </div>
+
+  <div class="step">
+    <span class="n">9</span><h3>按「驗證並登入」</h3>
+    <p>按最下面的<b>驗證並登入</b>就完成了。</p>
+    <img class="shot" src="help/key-9.jpg" alt="按驗證並登入" width="600" height="1232" loading="lazy">
+    <div class="do">系統會<b>真的去 Google 驗證一次</b>，貼錯的話當下就會告訴你，
+    不會等到練習到一半才出問題。</div>
+    <a class="big" href="./">回到 AI招募教練 →</a>
+  </div>
+
+  <h2 style="font-size:28.5px;margin-top:28px">常見問題</h2>
+  <div class="card">
+    <div class="faq"><p><b>會花錢嗎？</b><br>
+      Gemini 有每日免費額度，正常練習用不完，也不需要綁信用卡。
+      額度用完時 App 會自動改用較小的模型（不會壞，但回饋品質會降一些），隔天恢復。</p></div>
+    <div class="faq"><p><b>金鑰會被別人看到嗎？</b><br>
+      不會。金鑰只存在你這台裝置的瀏覽器裡，這個網站沒有後端可以收，
+      我們也看不到。共用裝置用完請按首頁下方的「登出／更換金鑰」。</p></div>
+    <div class="faq"><p><b>我的練習內容會外流嗎？</b><br>
+      你輸入的內容會送到 Google 的 AI 服務產生回應，這點跟你直接用 ChatGPT 一樣。
+      但<b>請不要輸入招募對象的真實姓名、電話或身分證號</b>，演練只需要招募對象的性別、年齡與大略背景。
+      訓練紀錄只同步到你自己的帳號，別人看不到。</p></div>
+    <div class="faq"><p><b>可以跟同事共用一把金鑰嗎？</b><br>
+      技術上可以，但不建議——一個人用完額度大家都不能用，而且免費額度本來就夠個人練習。</p></div>
+    <div class="faq"><p><b>「金鑰無效」是什麼意思？</b><br>
+      多半是兩種情況：複製時漏字（請用第 7 步的複製圖示），
+      或這把金鑰是舊格式（Google 自 2026 年 9 月起不再接受舊的 Standard key）。
+      最快的解法是回 AI Studio 重新建一把。</p></div>
+    <div class="faq"><p><b>換手機要重新申請嗎？</b><br>
+      不用。同一把金鑰可以在多台裝置使用，回 AI Studio 複製同一串貼上就好。
+      用同一個帳號登入的話，訓練紀錄會跟著過去。</p></div>
+  </div>
+
+  <p class="note">本教學所描述的畫面是 Google 的服務，Google 可能隨時調整介面文字與流程。
+  若實際畫面與此處不同，請以 Google AI Studio 上的說明為準。</p>
+  <a class="back-link" href="./">‹ 回到 AI招募教練</a>
+</div>
+</body>
+</html>
