@@ -253,3 +253,10 @@ label.inline input[type=checkbox]{width:26px;height:26px;flex:none;accent-color:
 .chat-q{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .chat-q .chip{font-size:18px;padding:6px 12px;text-align:left}
 .transcript .msg{max-width:100%;font-size:19.5px}
+/* 痛點分析之後的二選一：兩顆都是實心、顏色不同、前面有圖示，一眼分得出來 */
+.btn.pick{color:#fff;line-height:1.3;padding:12px 8px}
+.btn.pick b{display:block;font-size:25.5px;white-space:nowrap}
+.btn.pick small{display:block;font-size:18px;opacity:.9}
+.btn.pick.call{background:#0f766e;border-color:#14b8a6}
+.btn.pick.meet{background:var(--acc);border-color:#60a5fa}
+.btn.pick:active{filter:brightness(1.15)}

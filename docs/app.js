@@ -421,6 +421,7 @@ const DEMO_STEPS = {
 function renderBrief(d) {
   const mode = S.fn;
   $('#b-title').textContent = FN_TITLE[mode];
+  $('#btn-start').textContent = mode === 'call' ? '📞 開始電訪演練' : '🤝 開始面談演練';
   $('#b-name').textContent = d.persona.name;
   $('#b-summary').textContent = [d.persona.summary, d.contextLabel, '難度：' + d.persona.difficultyLabel].filter(Boolean).join('　·　');
   $('#b-obj').textContent = d.scenario?.objective || MODES[mode].objective;
@@ -546,7 +547,8 @@ function push(log, speaker, text) {
 $('#btn-start').onclick = async () => {
   voice.unlock();                                    // iOS：第一句朗讀必須在使用者手勢中
   voice.resetStats();
-  $('#p-log').innerHTML = ''; $('#p-name').textContent = S.persona.name;
+  // 演練畫面標出現在練的是電訪還是面談，避免搞混
+  $('#p-log').innerHTML = ''; $('#p-name').textContent = (S.fn === 'call' ? '📞 電訪｜' : '🤝 面談｜') + S.persona.name;
   $('#p-found').hidden = S.fn !== 'meet';
   if (S.fn === 'meet') $('#p-found').textContent = foundText({ concerns: 0, motives: 0 });
   S.ended = false; show('play');
