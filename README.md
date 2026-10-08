@@ -109,7 +109,7 @@ node tools/uitest.mjs       # 畫面端到端（約 20 次，不花真人語音�
 node tools/fbcheck.mjs      # 帳號同步與安全規則（會建立並刪除一個測試帳號）
 ```
 
-每次改版：`sw.js` 的 `VERSION` +1 → 跑 selftest → commit → push → iPhone 實機測試。
+每次改版：`node tools/bump.mjs`（sw.js 的 VERSION +1，所有檔案引用的 `?v=` 一起更新）→ 跑 selftest → commit → push → iPhone 實機測試。
 
 ---
 

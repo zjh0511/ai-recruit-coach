@@ -79,6 +79,15 @@ if (section(1, '規則層（不用金鑰）')) {
   ok(/const PREFIX = 'recruit-'/.test(sw) && /k\.startsWith\(PREFIX\) && k !== CACHE/.test(sw),
     'Service Worker 只清自己的舊快取（不會刪到 AI業務教練的）');
   ok(/fetch\(req\.url, \{ cache: 'no-cache' \}\)/.test(sw), 'Service Worker 繞過 HTTP 快取（AI業務教練 D026）');
+  // R015：新的頁面一定要抓同一版的樣式與程式（iPhone 實測拿到新版面＋舊樣式）
+  const ver = /const VERSION = 'v(\d+)'/.exec(sw)[1];
+  const refs = files(DOCS, /\.(js|html)$/).filter(f => !f.endsWith('sw.js')).flatMap(f => {
+    const t = fs.readFileSync(f, 'utf8');
+    const re = f.endsWith('.html') ? /(?:href|src)="((?!https?:)[^"]+\.(?:css|js)[^"]*)"/g : /\bfrom\s+['"](\.{1,2}\/[^'"]+)['"]/g;
+    return [...t.matchAll(re)].map(m => `${path.basename(f)}→${m[1]}`);
+  });
+  const unversioned = refs.filter(r => !r.endsWith(`?v=${ver}`));
+  ok(refs.length >= 20 && !unversioned.length, `${refs.length} 個檔案引用都帶 ?v=${ver}（和 sw.js 的 VERSION 一致）`, unversioned.join(', '));
   const shell = [...sw.matchAll(/'\.\/([^']*)'/g)].map(x => x[1]).filter(Boolean);
   const missing = shell.filter(f => !fs.existsSync(path.join(DOCS, f)));
   ok(!missing.length, `預快取清單的 ${shell.length} 個檔案都存在`, missing.join(', '));
