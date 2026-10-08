@@ -2,8 +2,11 @@
 // 架構與 AI業務教練（zjh0511/ai-sales-coach）相同：純前端，金鑰只存在這台裝置，
 // 帳號與訓練紀錄透過 Firebase 同步（和 AI業務教練共用同一個專案，資料放在 /recruit/<uid>）。
 //
-// 階段 0：登入、首頁、模型設定、訓練紀錄、加到主畫面。四個功能依企劃書 §5 逐階段接上。
+// 四大功能：招募對象痛點分析、招募邀約電訪演練、招募面談技巧演練、問問招募教練。
+import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js';
+import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js';
 import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js';
+import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js';
 import * as acct from './engine/account.js';
 import * as own from './engine/owner.js';
 
@@ -21,18 +24,21 @@ const SEEN_KEY = own.PREFIX + 'seen';
 const PROV_KEY = own.PREFIX + 'provider';
 const INSTALL_TIP_KEY = own.PREFIX + 'installtip';
 
-const S = { fn: null };
-
-// 各功能開放的階段。還沒做好的先告訴使用者，不要讓按鈕按了沒反應。
-const COMING = {
-  pain: '招募對象痛點分析：開發中（階段 1）',
-  call: '招募邀約電訪演練：開發中（階段 2）',
-  meet: '招募面談技巧演練：開發中（階段 3）',
-  chat: '問問招募教練：開發中（階段 4）',
+const S = {
+  fn: 'call',            // 目前功能：pain | call | meet | chat
+  sessionId: null, persona: null, ended: false, busy: false,
+  totals: null,          // 面談：顧慮／動機各有幾項
+  lastCandidate: null,   // 最近一次的招募對象資料卡，可以直接接去下一個功能
+  lastFb: null,
+  chatHistory: [],
 };
+
+const FN_TITLE = { pain: '招募對象痛點分析', call: '招募邀約電訪演練', meet: '招募面談技巧演練', chat: '問問招募教練' };
 
 // ── 畫面切換 ────────────────────────────────────────────────
 function show(name) {
+  if (name !== 'chat') chatVoiceOff();
+  vmode = name === 'chat' ? 'chat' : 'play';
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + name));
   if (name === 'history') renderHistory();
   if (name === 'models') renderModels();
@@ -48,6 +54,7 @@ function show(name) {
 document.addEventListener('click', e => {
   const g = e.target.closest('[data-go]');
   if (!g) return;
+  if (g.dataset.go === 'home') abort();
   show(g.dataset.go);
 });
 
@@ -254,17 +261,709 @@ async function renderModels() {
 }
 
 function logout(reason) {
+  abort();
   my.del(K.apikey);
   disconnect();
   if (reason) { $('#lg-msg').className = 'note err'; $('#lg-msg').textContent = reason; }
   show('login');
 }
 
+const busy = (msg, on = true) => {
+  $('#wait-msg').textContent = msg;
+  $('#wait-spin').hidden = false; $('#eval-fail').hidden = true;
+  if (on) show('wait');
+};
+
+// 共用的小元件
+const card = (title, ...kids) => { const c = el('div', 'card'); if (title) c.append(el('h4', null, title)); c.append(...kids); return c; };
+const list = arr => { const u = el('ul'); arr.forEach(x => u.append(el('li', null, x))); return u; };
+function fold(title, open, ...kids) {
+  const d = el('details', 'card fold'); d.open = open;
+  d.append(el('summary', null, title), ...kids);
+  return d;
+}
+
 // ── 首頁四大功能 ────────────────────────────────────────────
-document.querySelectorAll('[data-fn]').forEach(b => b.onclick = () => {
-  S.fn = b.dataset.fn;
-  toast(COMING[S.fn] || '開發中', 3200);
+document.querySelectorAll('[data-fn]').forEach(b => b.onclick = () => openFn(b.dataset.fn));
+
+function openFn(fn) {
+  S.fn = fn;
+  if (fn === 'chat') { renderChat(); return show('chat'); }
+  openIntake(fn);
+}
+
+// ── 招募對象資料卡 ──────────────────────────────────────────
+// 一張資料卡三個功能共用：痛點分析完可以直接接去練電訪或面談，不用重填。
+function openIntake(fn, keep = true) {
+  S.fn = fn;
+  $('#i-title').textContent = FN_TITLE[fn];
+  $('#i-diff-wrap').hidden = fn === 'pain';
+  $('#i-ctx-label').firstChild.nodeValue = fn === 'meet' ? '你和對方的關係（這次面談是怎麼約到的）' : '你和對方的關係';
+  $('#btn-go').textContent = fn === 'pain' ? '分析痛點' : '建立招募對象';
+  const p = prefs();                       // 沿用上次的難度與情境，不用每次重選
+  if (p.diff) setChip('#f-diff', p.diff);
+  if (p.ctx && CONTEXTS[p.ctx]) setChip('#f-ctx', p.ctx);
+  const c = keep && S.lastCandidate;
+  if (c) {
+    setChip('#f-gender', c.gender); $('#f-age').value = c.age; $('#f-bg').value = c.background;
+    setChip('#f-ctx', c.context); $('#f-ctxnote').value = c.contextNote || '';
+  }
+  syncDifficulty();
+  show('intake');
+  $('#s-intake .scroll').scrollTop = 0;
+}
+
+for (const id of ['#f-gender', '#f-diff', '#f-ctx']) {
+  $(id).addEventListener('click', e => {
+    const c = e.target.closest('.chip'); if (!c) return;
+    $(id).querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
+    if (id === '#f-diff') syncDifficulty();
+  });
+}
+const pick = id => $(id).querySelector('.chip.on')?.dataset.v;
+const setChip = (id, v) => { const c = v && $(id).querySelector(`.chip[data-v="${v}"]`); if (c) c.click(); };
+
+// 範例：按一下帶入 10 種台灣常見的招募對象原型（企劃書 §3.1）
+for (const x of SAMPLES) {
+  const b = el('button', 'chip', x.label);
+  b.onclick = () => {
+    setChip('#f-gender', x.gender); $('#f-age').value = x.age; $('#f-bg').value = x.background;
+    $('#f-sample').querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === b));
+  };
+  $('#f-sample').append(b);
+}
+
+const DIFF_HINT = {
+  1: '對方溫和有耐心，你講不順時會善意幫你接話。第一次練習建議從這裡開始。',
+  2: '對方態度正常，會先問「你找我什麼事？」，需要一個清楚、真誠的理由才願意聽下去。',
+  3: '對方對保險業有刻板印象，有一個明確的顧慮要你處理。',
+  4: '對方防備心強、回答很短，會接連丟出兩到三個顧慮。',
+  5: '接近真實的難搞對象：排斥保險業、連續拒絕，隨時可能結束談話。',
+};
+const syncDifficulty = () => { $('#diff-hint').textContent = DIFF_HINT[pick('#f-diff')] || ''; };
+
+$('#btn-go').onclick = async () => {
+  const background = $('#f-bg').value.trim();
+  if (!background) return toast('請先描述一下招募對象的背景');
+  const cand = {
+    gender: pick('#f-gender') || '男', age: $('#f-age').value.trim(), background,
+    context: pick('#f-ctx') || 'warm', contextNote: $('#f-ctxnote').value.trim(),
+  };
+  S.lastCandidate = cand;
+
+  if (S.fn === 'pain') {
+    savePrefs({ ctx: cand.context });
+    busy('正在分析這位招募對象可能的痛點…');
+    try { renderPain(await api('/analyze/pain', cand)); show('pain'); }
+    catch (e) { if (e.auth) return logout(e.message); toast(e.message, 4000); show('intake'); }
+    return;
+  }
+
+  busy('正在建立招募對象、準備示範話術稿…');
+  try {
+    const d = await api('/session/start', { ...cand, mode: S.fn, difficulty: pick('#f-diff') });
+    savePrefs({ diff: pick('#f-diff'), ctx: cand.context });
+    S.sessionId = d.sessionId; S.persona = d.persona; S.totals = d.totals; S.ended = false;
+    renderBrief(d);
+    show('brief');
+  } catch (e) { if (e.auth) return logout(e.message); toast(e.message, 4000); show('intake'); }
+};
+
+// ── 功能一：痛點分析結果 ────────────────────────────────────
+function renderPain(d) {
+  const b = $('#pain-body'); b.innerHTML = '';
+  if (d.profile) b.append(card('對這位招募對象的理解', el('p', null, d.profile)));
+
+  const c1 = card('三個潛在痛點');
+  d.points.forEach((p, i) => {
+    const w = el('div', 'pt');
+    w.append(el('b', null, `${i + 1}. ${p.pain}`));
+    if (p.reason) w.append(el('p', 'ev', '推測原因：' + p.reason));
+    if (p.opportunity) w.append(el('p', 'lbl', '事業機會可以怎麼回應'), el('p', null, p.opportunity));
+    if (p.question) w.append(el('p', 'lbl', '你可以這樣問'), el('p', 'quote', p.question));
+    c1.append(w);
+  });
+  b.append(c1);
+
+  if (d.concerns?.length) {
+    const c = card('他最可能的顧慮');
+    d.concerns.forEach(x => {
+      const w = el('div', 'imp');
+      w.append(el('b', null, '「' + x.concern.replace(/^「|」$/g, '') + '」'), el('p', null, x.approach));
+      c.append(w);
+    });
+    b.append(c);
+  }
+
+  const a = d.approach || {};
+  if (a.channel || a.opening) {
+    const c2 = card('建議的接觸方式');
+    if (d.contextLabel) c2.append(el('p', 'muted', '你和對方的關係：' + d.contextLabel));
+    if (a.channel) c2.append(el('p', 'lbl', '方式與時機'), el('p', null, a.channel));
+    if (a.opening) c2.append(el('p', 'lbl', '開場可以這樣說'), el('p', 'quote', a.opening));
+    if (a.avoid) c2.append(el('p', 'lbl', '要避免'), el('p', null, a.avoid));
+    b.append(c2);
+  }
+  if (d.warning) b.append(el('p', 'note', '⚠️ ' + d.warning));
+  b.append(el('p', 'note', '以上皆為依有限資訊所做的推測，實際情況仍須透過提問確認。收入與制度的具體數字，一律以所屬公司公告為準。'));
+  b.scrollTop = 0;
+}
+
+$('#btn-pain2call').onclick = () => openIntake('call');
+$('#btn-pain2meet').onclick = () => openIntake('meet');
+
+// ── 演練前：示範話術稿 ──────────────────────────────────────
+const DEMO_STEPS = {
+  call: [['opening', '開場與交代來意'], ['invite', '邀約見面']],
+  meet: [['icebreak', '破冰'], ['situation_q', '了解現況'], ['motive_q', '引出動機'], ['opportunity', '介紹事業機會'], ['close', '邀約下一步']],
+};
+
+function renderBrief(d) {
+  const mode = S.fn;
+  $('#b-title').textContent = FN_TITLE[mode];
+  $('#b-name').textContent = d.persona.name;
+  $('#b-summary').textContent = [d.persona.summary, d.contextLabel, '難度：' + d.persona.difficultyLabel].filter(Boolean).join('　·　');
+  $('#b-obj').textContent = d.scenario?.objective || MODES[mode].objective;
+  $('#b-goal').textContent = mode === 'call'
+    ? '成功：約到見面。'
+    : '成功：對方答應參加事業說明會或二次面談；最好的結果：願意去考照。'
+      + `對方心裡有 ${d.totals.concerns} 個顧慮、${d.totals.motives} 個想要的事，問對問題他才會說。`;
+
+  const box = $('#b-demo'); box.innerHTML = '';
+  box.append(el('h4', null, '示範話術稿（參考用，不是標準答案）'));
+  const demo = d.demo || {};
+  const steps = DEMO_STEPS[mode];
+  const objKey = mode === 'call' ? 'objection' : 'concern';
+  // 處理拒絕／顧慮放在邀約之前（面談）或最後（電訪），照實際對話順序
+  const order = mode === 'call' ? [...steps, [objKey]] : [...steps.slice(0, 4), [objKey], steps[4]];
+  for (const [k, t] of order) {
+    if (k === objKey) {
+      const o = demo[objKey];
+      if (!o) continue;
+      box.append(el('p', 'step-t', mode === 'call' ? '遇到拒絕時' : '遇到顧慮時'),
+        el('p', 'quote', '對方：' + (o.candidate || '')), el('p', null, '你：' + (o.you || '')));
+    } else if (demo[k]) box.append(el('p', 'step-t', t), el('p', null, demo[k]));
+  }
+  $('#s-brief .scroll').scrollTop = 0;
+}
+
+// ── Voice Engine ────────────────────────────────────────────
+// 自動收音的排程用 epoch 擋掉過期的排程（AI業務教練 §4.3）：使用者自己按了麥克風、
+// 打字送出、或演練結束之後，先前排定的「幾秒後開麥克風」都必須作廢。
+let listenTimer = 0, listenEpoch = 0, emptyTries = 0, stallTries = 0;
+const cancelListen = () => { clearTimeout(listenTimer); listenEpoch++; };
+
+// 語音引擎只有一個（iOS 上多開 AudioContext／辨識器很容易互相卡住），
+// 演練與「問問招募教練」共用；callback 依目前畫面分派。
+let vmode = 'play';
+const voice = new Voice({
+  onPartial: t => { if (vmode === 'chat') return chatV.partial(t); if (t) setStatus('🎙️ ' + t, 'live'); },
+  onFinal: t => { if (vmode === 'chat') return chatV.final(t); emptyTries = 0; stallTries = 0; submit(t); },
+  onEmpty: () => {
+    if (vmode === 'chat') return chatV.empty();
+    if (++emptyTries <= 3) return nextTurn(600);
+    emptyTries = 0;
+    setStatus('沒有聽到聲音，點一下麥克風再說');
+  },
+  onStall: () => {
+    if (vmode === 'chat') return chatV.stall();
+    if (++stallTries <= 2) { setStatus('麥克風重新連接中…'); return nextTurn(800); }
+    stallTries = 0;
+    setStatus('麥克風沒有反應，點一下麥克風再試；也可以直接打字');
+  },
+  onState: s => {
+    if (s === 'tts-quota-day') return quotaNotice();
+    if (s === 'tts-fallback') {
+      if (!ttsNotice) { ttsNotice = true; toast('真人語音暫時無法使用，先改用手機內建語音', 3500); }
+      return;
+    }
+    if (vmode === 'chat') return chatV.state(s);
+    const m = $('#btn-mic');
+    m.classList.toggle('rec', s === 'listening');
+    m.classList.toggle('talk', s === 'speaking');
+    if (s === 'listening') setStatus('🎙️ 請說話…', 'live');
+    else if (s === 'speaking') setStatus('對方正在說話（點麥克風可打斷）');
+    else if (typeof s === 'string' && s.startsWith('error:')) {
+      setStatus('');
+      toast(s.includes('not-allowed') ? '麥克風權限被拒絕，請到 Safari 設定開啟' : '沒聽清楚，再說一次或直接打字');
+    }
+  },
 });
+
+// 真人語音（Gemini TTS）：用使用者同一把金鑰，三個語音模型輪流（AI業務教練 D043）
+let ttsNotice = false;
+const ttsStore = {
+  load: () => JSON.parse(my.get(K.ttsq) || '{}'),
+  save: st => my.set(K.ttsq, JSON.stringify(st)),
+};
+const tts = new TtsRotator({ store: ttsStore });
+voice.cloud = {
+  stream: (text, gender, signal, hint) => {
+    const { provider, key } = cred();
+    if (provider !== 'gemini' || !key) throw new Error('tts no key');
+    return tts.stream(key, text, hint?.cloudVoice || voiceFor(gender === '女' ? '女' : '男'), signal);
+  },
+};
+
+// 三個語音模型今天的免費額度都用完了：講清楚原因、幾點恢復。每天只講一次。
+const QUOTA_NOTICE_KEY = own.PREFIX + 'ttsq.notice';
+function quotaNotice() {
+  const reset = nextPacificMidnight();
+  if (localStorage.getItem(QUOTA_NOTICE_KEY) === String(reset)) return;
+  localStorage.setItem(QUOTA_NOTICE_KEY, String(reset));
+  const day = new Date(reset).toDateString() === new Date().toDateString() ? '今天' : '明天';
+  const at = new Date(reset).toLocaleTimeString('zh-TW', { hour: 'numeric', minute: '2-digit' });
+  const lead = `Google 免費的真人語音每天有上限（和 AI業務教練共用同一把金鑰的話是兩邊合計），今天的已經用完，<b>${day}${at}會恢復</b>。`
+    + '在那之前 AI 對話照常，只是聲音先改用手機內建的朗讀。';
+  if (!platform().ios) return sheet('今天的免費真人語音用完了', lead, [], { why: false });
+  sheet('今天的免費真人語音用完了', lead + '<br>iPhone 內建的聲音可以免費換成好聽很多的版本：', [
+    ['打開「設定」→「輔助使用」→「朗讀內容」→「聲音」'],
+    ['選「中文（台灣）」→「美佳」，下載<b>加強版</b>', '檔案約一兩百 MB，建議連 Wi-Fi 下載'],
+    ['下載完回到 App，之後的內建聲音就會自然很多'],
+  ], { why: false });
+}
+
+const speakHint = () => ({ ...(S.persona?.voice || {}), gender: S.persona?.gender === '女' ? '女' : '男' });
+const setStatus = (t, cls = '') => { const n = $('#p-status'); n.textContent = t; n.className = 'status ' + cls; };
+
+const VOICE_HINT_KEY = own.PREFIX + 'voicehint';
+function hintVoiceQuality() {
+  if (voice.cloud) return;
+  if (localStorage.getItem(VOICE_HINT_KEY)) return;
+  const v = voiceInfo();
+  if (!v || v.enhanced) return;
+  localStorage.setItem(VOICE_HINT_KEY, '1');
+  toast('想讓對方的聲音更像真人？iPhone：設定 → 輔助使用 → 旁白 → 語音 → 中文 → 下載「加強版」', 9000);
+}
+
+function push(log, speaker, text) {
+  const n = $(log);
+  n.appendChild(el('div', 'msg ' + speaker, text));
+  n.scrollTop = n.scrollHeight;
+}
+
+// ── 開始演練 ────────────────────────────────────────────────
+$('#btn-start').onclick = async () => {
+  voice.unlock();                                    // iOS：第一句朗讀必須在使用者手勢中
+  voice.resetStats();
+  $('#p-log').innerHTML = ''; $('#p-name').textContent = S.persona.name;
+  $('#p-found').hidden = S.fn !== 'meet';
+  if (S.fn === 'meet') $('#p-found').textContent = foundText({ concerns: 0, motives: 0 });
+  S.ended = false; show('play');
+  if (!supported.stt) toast('這個瀏覽器不支援語音辨識，請用下方文字輸入', 4000);
+  else hintVoiceQuality();
+  try {
+    const d = await api('/session/begin', { sessionId: S.sessionId });
+    push('#p-log', 'customer', d.opening);
+    await voice.speak(d.opening, speakHint());
+    nextTurn();
+  } catch (e) { toast(e.message); }
+};
+
+const foundText = f => `顧慮 ${f.concerns}/${S.totals?.concerns ?? 0}・動機 ${f.motives}/${S.totals?.motives ?? 0}`;
+
+function nextTurn(delay = MIC_AFTER_TTS_MS) {
+  if (S.ended) return;
+  if (!supported.stt) return setStatus('請用下方輸入框回覆');
+  if (voice.state === 'listening') return;
+  clearTimeout(listenTimer);
+  const ep = ++listenEpoch;
+  if (delay > 1000) setStatus('正在切回麥克風…（點麥克風可以直接開始）');
+  listenTimer = setTimeout(() => {
+    if (ep !== listenEpoch || S.ended || S.busy) return;
+    if (!document.querySelector('#s-play.on')) return;
+    if (voice.state !== 'idle') return;
+    if (!voice.listen()) setStatus('點一下麥克風開始說話');
+  }, delay);
+}
+
+$('#btn-mic').onclick = () => {
+  voice.unlock();
+  cancelListen();
+  emptyTries = 0; stallTries = 0;
+  if (voice.state === 'speaking') { voice.stopSpeaking(); voice.listen(); }
+  else if (voice.state === 'listening') voice.stopListening();
+  else voice.listen();
+};
+
+$('#btn-send').onclick = () => {
+  const t = $('#p-text').value.trim();
+  if (t) { $('#p-text').value = ''; voice.abortListening(); submit(t); }
+};
+$('#p-text').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-send').click(); });
+
+async function submit(text) {
+  if (S.busy || S.ended || !S.sessionId) return;
+  cancelListen();
+  S.busy = true;
+  push('#p-log', 'user', text);
+  setStatus('對方思考中…', 'think');
+  try {
+    const d = await api('/session/turn', { sessionId: S.sessionId, text });
+
+    if (d.type === 'compliance') {
+      push('#p-log', 'system', d.text);
+      setStatus(''); S.busy = false;
+      toast('偵測到合規風險，演練已暫停，請換個說法再講一次', 4000);
+      return nextTurn(300);
+    }
+
+    push('#p-log', 'customer', d.text);
+    if (S.fn === 'meet') $('#p-found').textContent = foundText(d.found);
+    if (d.outcome) toast('🎉 ' + d.outcome.label, 3200);
+    if (d.warn) toast('注意用語：' + d.warn[0], 4000);
+    // 談話結束要在朗讀「之前」就標記：對方講最後一句時使用者若又開口，不能再送出一回合
+    if (d.ended) S.ended = true;
+    S.busy = false;
+    await voice.speak(d.text, speakHint());
+
+    if (d.ended) { setStatus('這次談話結束了'); setTimeout(finish, 900); }
+    else nextTurn();
+  } catch (e) {
+    S.busy = false; setStatus('');
+    if (e.auth) { S.sessionId = null; return logout(e.message); }
+    toast(e.message);
+    if (/逾時/.test(e.message)) { S.sessionId = null; show('home'); }
+  }
+}
+
+$('#btn-end').onclick = () => { S.ended = true; cancelListen(); voice.reset(); finish(); };
+
+async function finish() {
+  if (!S.sessionId) return show('home');
+  cancelListen(); voice.reset(); busy('正在分析你剛才的表現…');
+  const id = S.sessionId;
+  try {
+    const fb = await api('/session/end', { sessionId: id });
+    S.sessionId = null;                     // 評分成功才放掉（AI業務教練 D033）
+    fb.voiceStats = voice.stats();
+    S.lastFb = fb;
+    renderFeedback(fb); saveHistory(fb); show('fb');
+  } catch (e) {
+    if (e.auth) return logout(e.message);
+    $('#wait-spin').hidden = true;
+    $('#wait-msg').textContent = '評分沒有完成';
+    $('#eval-why').textContent = e.message.replace(/[。.！!\s]+$/, '')
+      + '。你的對話紀錄都還在，稍等一下再按「重新評分」就可以。';
+    $('#eval-fail').hidden = false;
+  }
+}
+
+$('#eval-retry').onclick = () => finish();
+$('#eval-drop').onclick = () => {
+  if (!confirm('放棄之後，這場演練的對話紀錄就不會留下。確定？')) return;
+  abort(); show('home');
+};
+
+function abort() {
+  if (S.sessionId) api('/session/abort', { sessionId: S.sessionId }).catch(() => {});
+  S.sessionId = null; S.ended = true; cancelListen(); voice.reset();
+}
+
+$('#btn-again').onclick = () => openIntake(S.fn);
+// 電訪約成功之後，最自然的下一步就是用同一位對象練面談
+$('#btn-next').onclick = () => {
+  if (S.fn === 'call' && S.lastFb?.outcome?.tier > 0) return openIntake('meet');
+  show('home');
+};
+
+// ── 回饋畫面 ────────────────────────────────────────────────
+function renderFeedback(fb) {
+  const b = $('#fb-body'); b.innerHTML = '';
+
+  const o = fb.outcome || { tier: 0, label: '' };
+  const oc = el('div', `card outcome t${o.tier}`);
+  oc.append(el('p', 'muted', `${fb.modeName}演練結果`), el('p', 'big', (o.tier === 2 ? '🏆 ' : o.tier === 1 ? '🎉 ' : '') + o.label));
+  oc.append(el('p', 'note', [fb.persona?.name, fb.contextLabel, '難度：' + fb.difficultyLabel].filter(Boolean).join('　·　')));
+  b.append(oc);
+
+  b.append(card('總評', el('p', null, fb.summary || '')));
+
+  const c2 = card('五項能力評分');
+  for (const k of Object.keys(NAMES)) {
+    const s = fb.scores?.[k]; if (!s) continue;
+    c2.append(starRow(NAMES[k], s.score, s.evidence));
+  }
+  const tot = Object.values(fb.scores || {}).map(s => s.score);
+  if (tot.length) c2.append(el('p', 'note', `平均 ${(tot.reduce((a, x) => a + x, 0) / tot.length).toFixed(1)} 顆星。只依文字逐字稿判斷，聽不到真正的音高音量，「親切感」是從用字與節奏推論。`));
+  b.append(c2);
+
+  // 違規一定要點名（GPT 版：回饋時一定要特別點名指正）——清單由程式提供，不靠模型記得
+  if (fb.violations?.length) {
+    const c = el('div', 'card warn');
+    c.append(el('h4', null, '⚠️ 合規提醒：這次有說法要調整'));
+    for (const v of fb.violations) {
+      const w = el('div', 'imp');
+      w.append(el('b', null, `「${v.quote}」`), el('p', 'law', `${v.type}｜${v.law}`), el('p', 'ev', v.why));
+      c.append(w);
+    }
+    if (fb.compliance_note) c.append(el('p', 'note', fb.compliance_note));
+    b.append(c);
+  }
+
+  if (fb.positives?.length) b.append(card('你做得好的地方', list(fb.positives)));
+
+  if (fb.improvements?.length) {
+    const c = card('可以再調整的地方');
+    fb.improvements.forEach(i => {
+      const d = el('div', 'imp');
+      d.append(el('b', null, i.point || ''), el('p', 'ev', i.why || ''), el('p', null, i.how || ''));
+      c.append(d);
+    });
+    b.append(c);
+  }
+
+  if (fb.example_script) b.append(card('示範話術', el('p', null, fb.example_script)));
+
+  if (fb.concerns?.length || fb.motives?.length) {
+    const fc = new Set(fb.metrics?.concernsFound || []), fm = new Set(fb.metrics?.motivesFound || []);
+    const c = card(`對方心裡真正在意的事（挖到 ${fc.size + fm.size}／${(fb.concerns?.length || 0) + (fb.motives?.length || 0)}）`);
+    if (fb.concerns?.length) { c.append(el('p', 'lbl', '顧慮')); c.append(list(fb.concerns.map(h => (fc.has(h) ? '✅ ' : '⬜ ') + h))); }
+    if (fb.motives?.length) { c.append(el('p', 'lbl', '想要的事（動機）')); c.append(list(fb.motives.map(h => (fm.has(h) ? '✅ ' : '⬜ ') + h))); }
+    b.append(c);
+  }
+
+  if (fb.next_challenge) b.append(card('下一次的挑戰', el('p', null, fb.next_challenge)));
+
+  if (fb.transcript?.length) {
+    const t = el('div', 'log transcript');
+    for (const m of fb.transcript) t.append(el('div', 'msg ' + (m.speaker === 'user' ? 'user' : 'customer'), m.text));
+    b.append(fold('完整逐字稿', false, t));
+  }
+
+  const m = fb.metrics || {};
+  const vs = fb.voiceStats;
+  b.append(el('p', 'note',
+    `回合數 ${m.turns}｜對談 ${m.durationSec} 秒｜對方最終信任度 ${m.finalTrust}/100｜對方引導你 ${m.guided} 次`
+    + `｜AI 生成 ${fb.avgLatencyMs} ms` + (vs ? `｜你說完到對方開口 平均 ${vs.avg} ms` : '')));
+
+  $('#btn-next').textContent = fb.mode === 'call' && o.tier > 0 ? '接著練面談' : '回首頁';
+  b.scrollTop = 0;
+}
+
+// ── 功能四：問問招募教練（可以打字，也可以語音對談）──────────────
+// 模型偶爾還是會冒出 Markdown 記號，純文字氣泡顯示會很醜，統一清掉
+const clean = s => (s || '')
+  .replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#{1,6}\s*/gm, '')
+  .replace(/^>\s?/gm, '').replace(/^[-*]\s+/gm, '・').trim();
+
+// 目前這一串對話存在這支手機（依帳號分開），按「清除」才刪。不同步到雲端。
+function saveChat() {
+  try { my.set(K.chat, JSON.stringify(S.chatHistory.slice(-60))); } catch { /* 容量滿時忽略 */ }
+}
+const loadChat = () => { try { S.chatHistory = JSON.parse(my.get(K.chat) || '[]'); } catch { S.chatHistory = []; } };
+
+const coachGender = () => (prefs().coach === '女' ? '女' : '男');
+const coachHint = () => ({ rate: 1, cloudVoice: COACH_VOICES[coachGender()] });
+
+const CHAT_STARTERS = [
+  '為什麼現在是加入保險業的好時機？',
+  '怎麼跟工程師談這份工作的收入？',
+  '對方說「我怕要賣給親友」，我該怎麼回應？',
+  '全職媽媽想重回職場，我可以怎麼切入？',
+  '新人前三個月怎麼帶，才留得住？',
+  '約完說明會之後，要怎麼跟進？',
+];
+
+function coachBubble(text) {
+  const m = el('div', 'msg coach', text);
+  const b = el('button', 'say', '🔊 聽');
+  b.onclick = () => {
+    voice.unlock();
+    if (voice.state === 'speaking') return voice.stopSpeaking();
+    CV.ep++; clearTimeout(CV.hold); voice.abortListening();
+    voice.speak(text, coachHint()).then(() => { if (CV.on) chatListen(); });
+  };
+  m.append(b);
+  return m;
+}
+
+function renderChat() {
+  const b = $('#ch-log'); b.innerHTML = '';
+  if (!S.chatHistory.length) {
+    const m = el('div', 'msg coach');
+    m.append(el('p', null, '招募上遇到什麼問題都可以問我：產業趨勢、事業機會怎麼說、不同背景的對象怎麼談、顧慮怎麼回應、新人怎麼留得住。可以打字，也可以按 🎙️ 用講的。'));
+    const q = el('div', 'chat-q');
+    for (const s of CHAT_STARTERS) {
+      const c = el('button', 'chip', s);
+      c.onclick = () => sendChat(s);
+      q.append(c);
+    }
+    m.append(q);
+    b.append(m);
+  }
+  for (const t of S.chatHistory) {
+    if (t.role === 'user') b.append(el('div', 'msg user' + (t.voice ? ' spoken' : ''), t.text));
+    else b.append(coachBubble(clean(t.text)));
+  }
+  $('#ch-coach').querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.v === coachGender()));
+  b.scrollTop = b.scrollHeight;
+}
+
+async function sendChat(q, spoken = false) {
+  if (!q || S.busy) return;
+  S.busy = true;
+  const log = $('#ch-log');
+  log.querySelector('.chat-q')?.remove();
+  log.append(el('div', 'msg user' + (spoken ? ' spoken' : ''), q));
+  const th = el('div', 'msg coach', '思考中…');
+  log.append(th); log.scrollTop = 1e9;
+  if (CV.on) chatStatus('教練思考中…', 'think');
+  try {
+    const d = await api('/coach/chat', { history: S.chatHistory, message: q, voice: CV.on });
+    const text = clean(d.reply);
+    th.replaceWith(coachBubble(text));
+    S.chatHistory.push({ role: 'user', text: q, ...(spoken ? { voice: 1 } : {}) }, { role: 'ai', text: d.reply });
+    saveChat();
+    if (d.compliance) toast('⚠️ ' + d.compliance[0], 6000);
+    S.busy = false; log.scrollTop = 1e9;
+    if (CV.on) { await voice.speak(text, coachHint()); chatListen(); }
+  } catch (e) {
+    S.busy = false;
+    if (e.auth) return logout(e.message);
+    th.textContent = '發生錯誤：' + e.message;
+    if (CV.on) chatStatus('剛剛沒有成功，點麥克風再說一次');
+  }
+}
+
+$('#ch-send').onclick = () => {
+  const q = $('#ch-text').value.trim();
+  if (!q || S.busy) return;
+  $('#ch-text').value = '';
+  sendChat(q);
+};
+$('#ch-text').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ch-send').click(); });
+$('#chat-clear').onclick = () => {
+  if (S.chatHistory.length && !confirm('清除這段對話？清除後就找不回來了。')) return;
+  S.chatHistory = []; saveChat(); renderChat();
+};
+
+// 教練聲音：選了就讓他聽一下。試聽是事先錄好的音檔，不花學員的語音額度（AI業務教練 D043）
+let previewAudio = null;
+$('#ch-coach').addEventListener('click', e => {
+  const c = e.target.closest('.chip'); if (!c) return;
+  savePrefs({ coach: c.dataset.v });
+  renderChat();
+  voice.unlock();
+  CV.ep++; clearTimeout(CV.hold); voice.abortListening(); voice.stopSpeaking();
+  previewAudio?.pause();
+  previewAudio = new Audio(`audio/coach-${c.dataset.v === '女' ? 'female' : 'male'}.mp3`);
+  const after = () => { if (CV.on) chatListen(); };
+  previewAudio.onended = after;
+  previewAudio.play().catch(after);
+});
+
+// ── 語音對談 ──
+// 問教練常常要描述一整段狀況、邊想邊講。一句結束後不馬上送出：繼續聽，
+// CHAT_HOLD_MS 內沒有再開口才送（AI業務教練 D042）。也可以按「講完了」立刻送出。
+const CHAT_HOLD_MS = 2500;
+const CV = { on: false, buf: [], pending: '', ep: 0, hold: 0, timer: 0, empty: 0, stall: 0, flushNow: false };
+const joinSaid = parts => parts.reduce((a, t) => (a && !/[，。！？、,.!?]$/.test(a) ? a + '，' : a) + t, '');
+const chatStatus = (t, cls = '') => { const n = $('#ch-status'); n.textContent = t; n.className = 'status ' + cls; };
+
+function chatVoiceOn() {
+  if (!supported.stt) return toast('這個瀏覽器不支援語音辨識，請用打字的', 4000);
+  voice.unlock();
+  CV.on = true; CV.buf = []; CV.pending = ''; CV.empty = 0; CV.stall = 0; CV.flushNow = false;
+  $('#s-chat').classList.add('voice');
+  chatListen(0);
+}
+
+function chatVoiceOff() {
+  if (!CV.on) return;
+  CV.on = false; CV.ep++;
+  clearTimeout(CV.hold); clearTimeout(CV.timer);
+  voice.abortListening(); voice.stopSpeaking();
+  if (CV.pending) CV.buf.push(CV.pending);
+  if (CV.buf.length) $('#ch-text').value = joinSaid(CV.buf);
+  CV.buf = []; CV.pending = '';
+  $('#s-chat').classList.remove('voice');
+  chatStatus('');
+}
+
+function chatListen(delay = MIC_AFTER_TTS_MS) {
+  if (!CV.on) return;
+  clearTimeout(CV.timer);
+  const ep = ++CV.ep;
+  if (delay > 1000) chatStatus('正在切回麥克風…（點麥克風可以直接開始）');
+  CV.timer = setTimeout(() => {
+    if (ep !== CV.ep || !CV.on || S.busy || !$('#s-chat.on')) return;
+    if (voice.state !== 'idle') return;
+    if (!voice.listen()) chatStatus('點一下麥克風開始說話');
+  }, delay);
+}
+
+function chatFlush() {
+  clearTimeout(CV.hold);
+  CV.flushNow = false;
+  if (CV.pending) { CV.buf.push(CV.pending); CV.pending = ''; }
+  const t = joinSaid(CV.buf).trim();
+  CV.buf = [];
+  if (!t) return;
+  CV.ep++; clearTimeout(CV.timer);
+  voice.abortListening();
+  sendChat(t, true);
+}
+
+const chatV = {
+  partial(t) {
+    if (!t || !CV.on) return;
+    clearTimeout(CV.hold);
+    CV.pending = t;
+    chatStatus('🎙️ ' + joinSaid([...CV.buf, t]), 'live');
+  },
+  final(t) {
+    if (!CV.on) return;
+    CV.buf.push(t); CV.pending = ''; CV.empty = 0; CV.stall = 0;
+    if (CV.flushNow) return chatFlush();
+    chatStatus('🎙️ ' + joinSaid(CV.buf) + '　（停一下就會送出）', 'live');
+    clearTimeout(CV.hold);
+    CV.hold = setTimeout(chatFlush, CHAT_HOLD_MS);
+    chatListen(0);
+  },
+  empty() {
+    if (!CV.on) return;
+    if (CV.buf.length || CV.pending) return chatFlush();
+    CV.flushNow = false;
+    if (++CV.empty <= 3) return chatListen(600);
+    CV.empty = 0;
+    chatStatus('沒有聽到聲音，點一下麥克風再說');
+  },
+  stall() {
+    if (!CV.on) return;
+    if (CV.buf.length) return chatFlush();
+    if (++CV.stall <= 2) { chatStatus('麥克風重新連接中…'); return chatListen(800); }
+    CV.stall = 0;
+    chatStatus('麥克風沒有反應，點一下麥克風再試；也可以改用打字');
+  },
+  state(s) {
+    const m = $('#ch-mic');
+    m.classList.toggle('rec', s === 'listening');
+    m.classList.toggle('talk', s === 'speaking');
+    if (!CV.on) return;
+    if (s === 'listening' && !CV.buf.length) chatStatus('🎙️ 請說話…', 'live');
+    else if (s === 'speaking') chatStatus('教練正在說話（點麥克風可打斷）');
+    else if (typeof s === 'string' && s.startsWith('error:')) {
+      chatStatus('');
+      toast(s.includes('not-allowed') ? '麥克風權限被拒絕，請到 Safari 設定開啟' : '沒聽清楚，再說一次或改用打字');
+    }
+  },
+};
+
+$('#ch-voice').onclick = chatVoiceOn;
+$('#ch-kb').onclick = chatVoiceOff;
+$('#ch-mic').onclick = () => {
+  voice.unlock();
+  CV.ep++; clearTimeout(CV.timer);
+  if (voice.state === 'speaking') { voice.stopSpeaking(); voice.listen(); }
+  else if (voice.state === 'listening') { CV.flushNow = true; voice.stopListening(); }
+  else if (CV.buf.length) chatFlush();
+  else voice.listen();
+};
+$('#ch-done').onclick = () => {
+  if (voice.state === 'listening') { CV.flushNow = true; voice.stopListening(); }
+  else chatFlush();
+};
 
 // ── 偏好設定 ────────────────────────────────────────────────
 const prefs = () => { try { return JSON.parse(my.get(K.prefs)) || {}; } catch { return {}; } };
@@ -297,10 +996,29 @@ function starRow(name, score, ev) {
 
 const history_ = () => { try { return JSON.parse(my.get(K.history) || '[]'); } catch { return []; } };
 
+function saveHistory(fb) {
+  try {
+    const h = history_();
+    h.unshift({
+      at: Date.now(), mode: fb.mode, modeName: fb.modeName,
+      persona: fb.persona?.summary || '', name: fb.persona?.name || '',
+      outcome: fb.outcome?.label || '', tier: fb.outcome?.tier || 0,
+      scores: Object.fromEntries(Object.entries(fb.scores || {}).map(([k, v]) => [k, v.score])),
+      summary: fb.summary, next: fb.next_challenge,
+      violations: fb.violations?.length || 0,
+    });
+    my.set(K.history, JSON.stringify(h.slice(0, 50)));
+    syncSoon();
+  } catch { /* 容量滿時忽略 */ }
+}
+
 function renderHistory() {
   const b = $('#h-body'); b.innerHTML = '';
   const h = history_();
-  if (!h.length) { b.append(el('p', 'note', '還沒有紀錄。電訪演練與面談演練開放後，每次練完的評分都會記在這裡。')); return; }
+  if (!h.length) { b.append(el('p', 'note', '還沒有紀錄。每次電訪演練、面談演練練完的評分都會記在這裡。')); return; }
+
+  const done = h.filter(r => r.tier > 0).length;
+  b.append(el('p', 'note', `共 ${h.length} 次演練，其中 ${done} 次成功約到下一步。`));
 
   const avg = {};
   for (const k of Object.keys(NAMES)) {
@@ -317,7 +1035,9 @@ function renderHistory() {
     c.append(el('h4', null, `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}　${r.modeName || ''}　${r.name || ''}`));
     if (r.persona) c.append(el('p', 'muted', r.persona));
     const tot = Object.values(r.scores || {});
-    if (tot.length) c.append(el('p', null, '平均 ' + (tot.reduce((a, x) => a + x, 0) / tot.length).toFixed(1) + ' 星'));
+    if (tot.length) c.append(el('p', null, [r.outcome && (r.tier === 2 ? '🏆 ' : r.tier === 1 ? '🎉 ' : '') + r.outcome,
+      '平均 ' + (tot.reduce((a, x) => a + x, 0) / tot.length).toFixed(1) + ' 星',
+      r.violations ? `⚠️ 合規提醒 ${r.violations} 次` : ''].filter(Boolean).join('｜')));
     if (r.summary) c.append(el('p', 'ev', r.summary));
     b.append(c);
   }
@@ -331,7 +1051,11 @@ function renderHistory() {
 let syncBadge = null, syncing = false, syncTimer;
 
 // 登入、登出、換人之後，把記憶體裡屬於前一位的東西換掉
-function switchOwner() { /* 階段 2 起：語音額度狀態、教練對話 */ }
+function switchOwner() {
+  loadChat();
+  try { tts.state = ttsStore.load(); } catch { tts.state = {}; }
+  S.lastCandidate = null; S.lastFb = null;
+}
 
 function bundle() {
   const p = prefs();
@@ -655,11 +1379,15 @@ function handleShortcut() {
   const go = new URLSearchParams(location.search).get('go');
   if (!go) return;
   history.replaceState({}, '', location.pathname);
-  if (COMING[go]) $(`[data-fn="${go}"]`)?.click();
+  // 第一次使用一定要先看過歡迎與提醒（GPT 版：第一次進入時要先說明提醒）
+  if (!localStorage.getItem(SEEN_KEY) || !cred().key) return;
+  if (FN_TITLE[go]) openFn(go);
 }
 
 // ── 啟動 ────────────────────────────────────────────────────
 $('#btn-welcome').onclick = () => { localStorage.setItem(SEEN_KEY, '1'); show('home'); };
+// 離開頁面（切換 App 也算）時只停掉麥克風與朗讀，不結束演練，回來還能繼續講
+window.addEventListener('pagehide', () => { chatVoiceOff(); voice.reset(); });
 $('#home-acct').hidden = true; $('#home-logout').hidden = true;
 
 // 額度用盡自動降階時，讓使用者知道發生了什麼，而不是默默變慢或變差

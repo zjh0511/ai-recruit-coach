@@ -19,10 +19,24 @@
 | 階段 | 內容 | 狀態 |
 |---|---|---|
 | 0 | 開專案：登入、首頁、模型設定、訓練紀錄、加到主畫面 | ✅ |
-| 1 | 招募對象痛點分析 | 開發中 |
-| 2 | 招募邀約電訪演練（語音） | — |
-| 3 | 招募面談技巧演練（語音） | — |
-| 4 | 問問招募教練＋收尾 | — |
+| 1 | 招募對象痛點分析 | ✅ |
+| 2 | 招募邀約電訪演練（語音） | ✅ |
+| 3 | 招募面談技巧演練（語音） | ✅ |
+| 4 | 問問招募教練（打字／語音） | ✅ |
+| 第二版 | 上傳公司招募制度資料、管理者報表、介紹影片 | — |
+
+## 四大功能
+
+| 功能 | 說明 |
+|---|---|
+| 🎯 招募對象痛點分析 | 填性別、年齡、背景（或按 10 種範例帶入）→ 三個潛在痛點＋事業機會怎麼回應＋可以直接問的問題、三個最可能的顧慮、建議的接觸方式 |
+| 📞 招募邀約電訪演練 | 示範話術稿 → AI 扮演招募對象接電話 → 目標是約到見面 → 五項星等＋教練回饋 |
+| 🤝 招募面談技巧演練 | 對方心裡有 2～3 個顧慮、1～2 個動機，問對問題才會說；答應事業說明會或二次面談算成功，願意考照是最佳結果 |
+| 💬 問問招募教練 | 產業趨勢、事業機會、話術、顧慮回應、新人留任；可以打字，也可以語音對談 |
+
+- **難易程度**：1 新手友善～5 實戰。對方卡住時會像真人一樣問「你找我什麼事？」，引導 3 次（新手友善 5 次）仍講不清楚就委婉拒絕。
+- **合規**：每一句都比對〈保險業務員管理規則〉，高風險說法當場暫停，回饋時點名條次。
+- **資料誠實**：AI 不給收入數字，一律「以公司制度為準」。
 
 ---
 
@@ -53,17 +67,24 @@ docs/                  ← GitHub Pages 網站根目錄
   sw.js                Service Worker（network-first，VERSION 每次改版 +1）
   manifest.webmanifest PWA 設定：圖示與桌面捷徑
   guide.html           API 金鑰申請教學
-  voice.js             收音與朗讀（階段 2 起使用）
+  voice.js             收音與朗讀
+  audio/               教練聲音試聽檔（不花語音額度）
   firebase-config.js   Firebase 公開設定
   engine/
     api.js             本地 API 層
     gateway.js         模型備援、重試、額度降級
     account.js         帳號與雲端同步（Firebase REST，無 SDK）
     owner.js           個人資料依帳號分開存放
-    tts.js             Gemini 真人語音輪替（階段 2 起使用）
+    tts.js             Gemini 真人語音輪替
+    prompts.js         提示詞：招募對象人設、示範話術、角色扮演、評分、教練問答
+    session.js         演練狀態機：引導次數、結果分級、評分規範化（程式管規則）
+    advisor.js         痛點分析、問問招募教練
+    compliance.js      合規詞庫（保險業務員管理規則）
     zhtw.js            簡轉繁保險絲
 tools/
-  selftest.mjs         自我測試（第 1 節不用金鑰）
+  selftest.mjs         自我測試（第 1、2 節不用金鑰；第 3～6 節呼叫 Gemini）
+  uitest.mjs           畫面端到端測試（無頭 Edge，iPhone 尺寸，會截圖）
+  keys.mjs             讀 D:\Hao+App\API Key.txt 的測試金鑰（不印出）
   fbcheck.mjs          帳號同步與安全規則的端到端檢查
   serve.mjs            本機開發用靜態伺服器
   gencert.mjs          本機 HTTPS 憑證
@@ -81,7 +102,11 @@ tools/
 ```bash
 node tools/gencert.mjs      # 產生本機 HTTPS 憑證（手機用麥克風必須走 HTTPS）
 node tools/serve.mjs        # 電腦 http://localhost:8444，手機 https://<區網IP>:8443
-node tools/selftest.mjs     # 自我測試
+node tools/selftest.mjs 1   # 規則層，不用金鑰
+node tools/selftest.mjs 2   # 演練規則（假的模型），不用金鑰
+node tools/selftest.mjs     # 全部，含真的呼叫 Gemini（約 35 次）
+node tools/uitest.mjs       # 畫面端到端（約 20 次，不花真人語音額度）
+node tools/fbcheck.mjs      # 帳號同步與安全規則（會建立並刪除一個測試帳號）
 ```
 
 每次改版：`sw.js` 的 `VERSION` +1 → 跑 selftest → commit → push → iPhone 實機測試。

@@ -22,9 +22,7 @@
 <section id="s-auth" class="screen">
   <div class="pad scroll">
     <div class="brand-hero">
-      <img class="brand-visual app-icon" src="icons/icon-192.png" alt="" width="192" height="192">
-      <h1 class="brand">AI招募教練</h1>
-      <p class="muted byline">豪老師 Hao+</p>
+      <img class="brand-visual" src="icons/brand-recruit.jpg" alt="AI招募教練 AI Recruit Coach｜豪老師 Hao+" width="600" height="600">
     </div>
 
     <button class="btn install" data-install hidden>
@@ -69,9 +67,7 @@
 <section id="s-login" class="screen">
   <div class="pad scroll">
     <div class="brand-hero">
-      <img class="brand-visual app-icon" src="icons/icon-192.png" alt="" width="192" height="192">
-      <h1 class="brand">AI招募教練</h1>
-      <p class="muted byline">豪老師 Hao+</p>
+      <img class="brand-visual" src="icons/brand-recruit.jpg" alt="AI招募教練 AI Recruit Coach｜豪老師 Hao+" width="600" height="600">
     </div>
 
     <button class="btn install" data-install hidden>
@@ -117,9 +113,7 @@
        沒有 scroll 會把「我了解」擠到畫面外（AI業務教練 D044）-->
   <div class="pad scroll">
     <div class="brand-hero">
-      <img class="brand-visual app-icon" src="icons/icon-192.png" alt="" width="192" height="192">
-      <h1 class="brand">AI招募教練</h1>
-      <p class="muted byline">豪老師 Hao+</p>
+      <img class="brand-visual" src="icons/brand-recruit.jpg" alt="AI招募教練 AI Recruit Coach｜豪老師 Hao+" width="600" height="600">
     </div>
     <div class="card warn">
       <p>歡迎使用 <b>AI招募教練</b>，謝謝你願意花時間練習！</p>
@@ -136,7 +130,7 @@
 <section id="s-home" class="screen">
   <div class="pad scroll">
     <div class="brand-row">
-      <img class="brand-visual app-icon" src="icons/icon-192.png" alt="" width="192" height="192">
+      <img class="brand-visual" src="icons/icon-192.png" alt="" width="192" height="192">
       <h1 class="brand">AI招募教練</h1>
     </div>
     <!-- 提醒常駐首頁：可以收合，但不能關掉 -->
@@ -174,6 +168,130 @@
       <span class="t-ico">📲</span>
       <span><b>加到主畫面</b><small>像一般 App 一樣全螢幕開啟</small></span>
     </button>
+  </div>
+</section>
+
+<!-- 招募對象資料卡（痛點分析／電訪／面談共用）。只收文字：GPT 版嚴禁接受截圖 -->
+<section id="s-intake" class="screen">
+  <header class="bar"><button class="back" data-go="home">‹</button><span id="i-title">招募對象</span></header>
+  <div class="pad scroll">
+    <label id="i-ctx-label">你和對方的關係<small>決定你此刻「合理知道對方什麼」，示範話術會照著設計</small></label>
+    <div class="chips" id="f-ctx">
+      <button class="chip on" data-v="warm">緣故</button>
+      <button class="chip" data-v="referral">轉介紹</button>
+      <button class="chip" data-v="cold">陌生開發</button>
+      <button class="chip" data-v="client">既有客戶</button>
+    </div>
+    <input id="f-ctxnote" type="text" placeholder="補充說明（選填），例如：大學同學，畢業後很少聯絡">
+
+    <label>看範例<small>按一下就帶入下面的資料，可以再自己修改</small></label>
+    <div class="chips samples" id="f-sample"></div>
+
+    <label>招募對象性別</label>
+    <div class="chips" id="f-gender"><button class="chip on" data-v="男">男</button><button class="chip" data-v="女">女</button><button class="chip" data-v="其他">其他</button></div>
+    <label>招募對象年齡</label>
+    <input id="f-age" type="text" placeholder="例如：約 35 歲" value="約 35 歲">
+    <label>招募對象背景<small>目前的行業、家庭狀況，<b>以及你想練的個性</b>——想到什麼就寫什麼</small></label>
+    <textarea id="f-bg" rows="5" placeholder="例如：科技業工程師，已婚有一個小孩，工作穩定但常加班，最近覺得升遷卡住。個性理性，喜歡看具體的資料。"></textarea>
+    <div id="i-diff-wrap">
+      <label>難易程度<small>只影響對方的抗拒程度，個性請寫在上面的背景欄</small></label>
+      <div class="chips" id="f-diff">
+        <button class="chip on" data-v="1">1 新手友善</button><button class="chip" data-v="2">2 一般</button>
+        <button class="chip" data-v="3">3 挑戰</button><button class="chip" data-v="4">4 高難度</button><button class="chip" data-v="5">5 實戰</button>
+      </div>
+      <p class="note" id="diff-hint"></p>
+    </div>
+    <p class="note">請用代稱，不要輸入真實姓名、電話、身分證號等個人資料。</p>
+  </div>
+  <div class="foot"><button class="btn primary" id="btn-go">下一步</button></div>
+</section>
+
+<!-- 功能一：痛點分析結果 -->
+<section id="s-pain" class="screen">
+  <header class="bar"><button class="back" data-go="home">‹</button><span>招募對象痛點分析</span></header>
+  <div class="pad scroll" id="pain-body"></div>
+  <div class="foot two">
+    <button class="btn" id="btn-pain2call">用這位對象練電訪</button>
+    <button class="btn primary" id="btn-pain2meet">用這位對象練面談</button>
+  </div>
+</section>
+
+<!-- 演練前：示範話術稿（GPT 版：在用戶開始練習之前，先提供示範話術稿） -->
+<section id="s-brief" class="screen">
+  <header class="bar"><button class="back" data-go="home">‹</button><span id="b-title">演練前準備</span></header>
+  <div class="pad scroll">
+    <div class="card"><h3 id="b-name"></h3><p id="b-summary" class="muted"></p></div>
+    <div class="card"><h4>這次的目標</h4><p id="b-obj"></p><p class="note" id="b-goal"></p></div>
+    <div class="card demo" id="b-demo"></div>
+    <p class="note">演練過程中 AI 只會扮演招募對象，不會教學或評分；你講得卡住時，對方會像真人一樣問你「找我什麼事？」。結束後才會給你回饋。</p>
+  </div>
+  <div class="foot"><button class="btn primary" id="btn-start">開始演練</button></div>
+</section>
+
+<!-- 語音演練 -->
+<section id="s-play" class="screen">
+  <header class="bar">
+    <span id="p-name" class="who"></span>
+    <span class="spacer"></span>
+    <span id="p-found" class="badge" hidden></span>
+    <button class="end" id="btn-end">結束練習</button>
+  </header>
+  <div id="p-log" class="log scroll"></div>
+  <div id="p-status" class="status">準備中…</div>
+  <div class="foot mic-foot">
+    <button class="mic" id="btn-mic"><span id="mic-ico">🎙️</span></button>
+    <div class="alt">
+      <input id="p-text" type="text" placeholder="也可以打字…" autocomplete="off">
+      <button class="btn sm" id="btn-send">送出</button>
+    </div>
+  </div>
+</section>
+
+<!-- 分析中 -->
+<section id="s-wait" class="screen center">
+  <div class="spin" id="wait-spin"></div>
+  <p id="wait-msg">正在分析你剛才的表現…</p>
+  <!-- 評分失敗時出現：逐字稿還在，不該讓使用者白練一場 -->
+  <div id="eval-fail" class="pad" hidden style="width:100%;max-width:420px">
+    <p class="note" id="eval-why" style="text-align:center"></p>
+    <button class="btn primary" id="eval-retry">重新評分</button>
+    <button class="link" id="eval-drop">放棄這場，回首頁</button>
+  </div>
+</section>
+
+<!-- 回饋 -->
+<section id="s-fb" class="screen">
+  <header class="bar"><button class="back" data-go="home">‹</button><span>教練回饋</span></header>
+  <div class="pad scroll" id="fb-body"></div>
+  <div class="foot two">
+    <button class="btn" id="btn-again">再練一次</button>
+    <button class="btn primary" id="btn-next">回首頁</button>
+  </div>
+</section>
+
+<!-- 功能四：問問招募教練 -->
+<section id="s-chat" class="screen">
+  <header class="bar"><button class="back" data-go="home">‹</button><span>問問招募教練</span><span class="spacer"></span><button class="end" id="chat-clear">清除</button></header>
+  <div class="vpick">
+    <span>教練聲音</span>
+    <div class="chips" id="ch-coach"><button class="chip" data-v="男">男聲・沉穩</button><button class="chip" data-v="女">女聲・溫暖</button></div>
+  </div>
+  <div id="ch-log" class="log scroll"></div>
+  <div class="foot">
+    <div class="alt">
+      <input id="ch-text" type="text" placeholder="說說你遇到的招募狀況…" autocomplete="off">
+      <button class="btn sm" id="ch-send">送出</button>
+      <button class="btn sm vbtn" id="ch-voice" aria-label="用講的">🎙️</button>
+    </div>
+    <!-- 語音對談：來回對話不用一直按；說的話都會留成文字 -->
+    <div class="vbar">
+      <p id="ch-status" class="status"></p>
+      <div class="vrow">
+        <button class="btn sm" id="ch-kb">⌨️ 打字</button>
+        <button class="mic" id="ch-mic" aria-label="麥克風"><span>🎙️</span></button>
+        <button class="btn sm" id="ch-done">講完了</button>
+      </div>
+    </div>
   </div>
 </section>
 

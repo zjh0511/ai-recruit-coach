@@ -3,6 +3,8 @@
 // 全部運算都在使用者自己的瀏覽器完成，金鑰與文件都不離開這台裝置。
 
 import { PROVIDERS, createAdapter, scrubKey, friendlyError } from './gateway.js';
+import * as CE from './session.js';
+import * as AD from './advisor.js';
 
 let gw = null;                 // 目前登入的模型連線
 let current = { provider: null, key: null };
@@ -70,7 +72,35 @@ export async function api(path, body = {}) {
       case '/models/status': return need().status();
       case '/models/set': return need().pin(body.model || null);
 
-      // 三大演練與問問招募教練：依開發階段逐一接上（企劃書 §5）
+      // 功能一：招募對象痛點分析
+      case '/analyze/pain':
+        if (!body.background?.trim()) throw new Error('請描述一下招募對象的背景');
+        return await AD.painPoints(need(), body);
+
+      // 功能二／三：招募邀約電訪、招募面談（角色扮演）
+      case '/session/start':
+        if (!body.background?.trim()) throw new Error('請描述一下招募對象的背景');
+        return await CE.startSession(need(), {
+          mode: body.mode === 'meet' ? 'meet' : 'call', gender: body.gender, age: body.age,
+          background: body.background.slice(0, 1000), difficulty: Number(body.difficulty) || 1,
+          context: body.context || 'warm', contextNote: (body.contextNote || '').slice(0, 300),
+        });
+      case '/session/begin': return CE.beginRoleplay(session(body));
+      case '/session/turn':
+        if (!body.text?.trim()) throw new Error('請輸入內容');
+        return await CE.handleTurn(need(), session(body), body.text.slice(0, 600));
+      case '/session/end': {
+        const s = session(body);
+        const out = await CE.evaluate(need(), s);
+        CE.dropSession(s.id);
+        return out;
+      }
+      case '/session/abort': CE.dropSession(body.sessionId); return { ok: true };
+
+      // 功能四：問問招募教練
+      case '/coach/chat':
+        if (!body.message?.trim()) throw new Error('請輸入內容');
+        return await AD.coachChat(need(), { ...body, message: body.message.slice(0, 2000) });
 
       default:
         throw new Error('unknown_endpoint');
@@ -91,11 +121,17 @@ export async function api(path, body = {}) {
     }
 
     // 我們自己丟出的操作提示，原文就是給使用者看的
-    if (/請先|沒有收到|未指定|請描述|請輸入|超過上限|讀不到|解析失敗|產生失敗|不支援|逾時，請重新開始/.test(raw)) {
+    if (/請先|沒有收到|未指定|請描述|請輸入|超過上限|讀不到|解析失敗|產生失敗|不支援|逾時，請重新開始|已經結束了/.test(raw)) {
       throw new Error(raw);
     }
 
     console.error(`[api] ${path} → ${raw.slice(0, 200)}`);
     throw new Error('剛剛好像卡了一下，請再試一次。');
   }
+}
+
+function session(body) {
+  const s = CE.getSession(body.sessionId);
+  if (!s) throw new Error('這次練習的連線已經逾時，請重新開始。');
+  return s;
 }

@@ -29,10 +29,6 @@ body{
 .brand-row .brand{margin:0;white-space:nowrap;font-size:min(45px,10.5vw)}
 .brand-visual.guide{width:min(40vw,160px);margin:0 auto 14px}
 .brand{font-size:45px;font-weight:800;margin:12px 0 0;letter-spacing:1px}
-/* 暫用的 App 圖示（等豪老師提供正式圖示，見企劃書 Q7）：比原本的品牌主視覺小一號 */
-.brand-hero .app-icon{width:min(32vw,128px);border-radius:28px}
-.brand-row .app-icon{width:64px}
-.byline{margin:4px 0 0}
 /* 首頁的提醒：可以收合，但不能關掉 */
 .remind{margin-top:12px}
 .remind summary{color:var(--warn);font-weight:700;font-size:19.5px;cursor:pointer}
@@ -242,3 +238,18 @@ label.inline input[type=checkbox]{width:26px;height:26px;flex:none;accent-color:
 .msg.user.spoken::before{content:"🎙️ ";font-size:.85em}
 .msg .say{display:block;margin:6px 0 0 auto;background:none;border:1px solid var(--line);border-radius:999px;
   color:var(--muted);font:inherit;font-size:18px;padding:2px 12px}
+
+/* ── AI招募教練新增 ── */
+.samples .chip{padding:6px 12px;font-size:19.5px}
+/* 演練結果分級：未成功／成功／最佳（程式判定，與星等分開） */
+.outcome{text-align:center}
+.outcome .big{font-size:30px;font-weight:800;margin:4px 0}
+.outcome.t0{border-color:#3a2f12;background:#1c1809} .outcome.t0 .big{color:var(--warn)}
+.outcome.t1{border-color:#1f5c3a;background:#0f2418} .outcome.t1 .big{color:var(--ok)}
+.outcome.t2{border-color:#a16207;background:#24200b} .outcome.t2 .big{color:#fbbf24}
+.law{color:var(--warn);font-size:18px}
+.demo .step-t{color:var(--acc);font-size:18px;font-weight:700;margin:12px 0 2px}
+.demo .step-t:first-of-type{margin-top:4px}
+.chat-q{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.chat-q .chip{font-size:18px;padding:6px 12px;text-align:left}
+.transcript .msg{max-width:100%;font-size:19.5px}

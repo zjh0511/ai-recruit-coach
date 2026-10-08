@@ -10,7 +10,7 @@
 // 注意：離線時只有「介面」打得開。演練需要呼叫 AI 服務商的 API，
 //   那一定要網路。這一點會在畫面上明確告知，不假裝可以離線練習。
 
-const VERSION = 'v1';                  // 改版時遞增，activate 時會清掉舊快取
+const VERSION = 'v2';                  // 改版時遞增，activate 時會清掉舊快取
 // 快取名稱一定要有 App 自己的前綴：AI招募教練和 AI業務教練都在 zjh0511.github.io，
 // 瀏覽器的 Cache Storage 是整個網站共用的。清舊快取時只能清自己的，
 // 否則一邊改版就把另一邊的離線快取整個刪掉。
@@ -22,10 +22,12 @@ const SHELL = [
   './', './index.html', './style.css', './app.js',
   './manifest.webmanifest', './guide.html',
   // 只預快取小尺寸圖標；512 的只有「加到主畫面」時才會被系統抓取
-  './icons/icon-192.png', './icons/apple-touch-icon.png',
+  './icons/icon-192.png', './icons/apple-touch-icon.png', './icons/brand-recruit.jpg',
   './firebase-config.js',
-  './engine/account.js', './engine/owner.js', './engine/zhtw.js',
-  './engine/api.js', './engine/gateway.js',
+  './voice.js', './audio/coach-male.mp3', './audio/coach-female.mp3',
+  './engine/account.js', './engine/owner.js', './engine/zhtw.js', './engine/tts.js',
+  './engine/api.js', './engine/gateway.js', './engine/prompts.js',
+  './engine/session.js', './engine/advisor.js', './engine/compliance.js',
 ];
 
 self.addEventListener('install', e => {
