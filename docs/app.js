@@ -3,13 +3,13 @@
 // 帳號與訓練紀錄透過 Firebase 同步（和 AI業務教練共用同一個專案，資料放在 /recruit/<uid>）。
 //
 // 四大功能：招募對象痛點分析、招募邀約電訪演練、招募面談技巧演練、問問招募教練。
-import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=8';
-import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=8';
-import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=8';
-import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=8';
-import * as acct from './engine/account.js?v=8';
-import * as own from './engine/owner.js?v=8';
-import { setOwner } from './engine/store.js?v=8';
+import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=9';
+import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=9';
+import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=9';
+import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=9';
+import * as acct from './engine/account.js?v=9';
+import * as own from './engine/owner.js?v=9';
+import { setOwner } from './engine/store.js?v=9';
 
 const $ = s => document.querySelector(s);
 const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };

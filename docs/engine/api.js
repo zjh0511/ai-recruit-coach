@@ -2,10 +2,10 @@
 // 保留與伺服器版完全相同的呼叫介面，UI 不需要知道背後有沒有伺服器。
 // 全部運算都在使用者自己的瀏覽器完成，金鑰與文件都不離開這台裝置。
 
-import { PROVIDERS, createAdapter, scrubKey, friendlyError } from './gateway.js?v=8';
-import * as CE from './session.js?v=8';
-import * as AD from './advisor.js?v=8';
-import * as KB from './knowledge.js?v=8';
+import { PROVIDERS, createAdapter, scrubKey, friendlyError } from './gateway.js?v=9';
+import * as CE from './session.js?v=9';
+import * as AD from './advisor.js?v=9';
+import * as KB from './knowledge.js?v=9';
 
 let gw = null;                 // 目前登入的模型連線
 let current = { provider: null, key: null };

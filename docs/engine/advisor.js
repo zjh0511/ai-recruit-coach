@@ -1,8 +1,8 @@
 // 非角色扮演類功能：招募對象痛點分析、問問招募教練。單次或短對話，不需要狀態機。
 
-import { parseJson } from './gateway.js?v=8';
-import { checkCompliance } from './compliance.js?v=8';
-import * as P from './prompts.js?v=8';
+import { parseJson } from './gateway.js?v=9';
+import { checkCompliance } from './compliance.js?v=9';
+import * as P from './prompts.js?v=9';
 
 // 需要嚴謹 JSON 的任務共用的重試邏輯（不同溫度會改變輸出結構）
 async function jsonCall(gw, prompt, opts, valid) {
