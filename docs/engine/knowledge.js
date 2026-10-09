@@ -7,10 +7,10 @@
 //   .txt / .md     → 直接讀
 // 文件存在使用者自己裝置的 IndexedDB（依帳號分開），不上雲端資料庫，也不進 GitHub。
 
-import { officeText } from './docx.js?v=9';
-import { parseJson } from './gateway.js?v=9';
-import { digestPrompt, lessonPrompt, scrubDeep, numberSet, unknownNumbers } from './prompts.js?v=9';
-import { allDocs, putDoc, delDoc, getDocById } from './store.js?v=9';
+import { officeText } from './docx.js?v=10';
+import { parseJson } from './gateway.js?v=10';
+import { digestPrompt, lessonPrompt, scrubDeep, numberSet, unknownNumbers } from './prompts.js?v=10';
+import { allDocs, putDoc, delDoc, getDocById } from './store.js?v=10';
 
 export const MAX_BYTES = 18 * 1024 * 1024;     // Google 單次請求的上限約 20MB
 export const MAX_PICK = 5;                     // 一次演練最多勾 5 份（豪老師 2026-10-09 決定）

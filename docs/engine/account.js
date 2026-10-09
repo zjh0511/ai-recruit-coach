@@ -5,7 +5,7 @@
 //
 // 同步範圍是刻意收窄的（使用者決定）：只有訓練紀錄與偏好設定。
 // **API 金鑰與上傳的教材／條款一律不上雲端**，只留在這台裝置。
-import { FB } from '../firebase-config.js?v=9';
+import { FB } from '../firebase-config.js?v=10';
 
 const IDP = 'https://identitytoolkit.googleapis.com/v1/accounts:';
 const TOKEN = 'https://securetoken.googleapis.com/v1/token';

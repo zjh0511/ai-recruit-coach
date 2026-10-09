@@ -8,10 +8,10 @@
 //   ・顧慮／動機：模型只回報編號，程式對回原文
 //   ・信任度、星等：程式夾住範圍
 
-import { parseJson } from './gateway.js?v=9';
-import { checkCompliance, interventionMessage } from './compliance.js?v=9';
-import * as P from './prompts.js?v=9';
-import * as KB from './knowledge.js?v=9';
+import { parseJson } from './gateway.js?v=10';
+import { checkCompliance, interventionMessage } from './compliance.js?v=10';
+import * as P from './prompts.js?v=10';
+import * as KB from './knowledge.js?v=10';
 
 // 至少要講幾句才算數：避免第一句就「答應見面」，練不到東西
 export const MIN_TURNS = { call: 2, meet: 4, system: 4 };

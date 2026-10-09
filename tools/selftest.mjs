@@ -475,6 +475,11 @@ if (live && section(4, '招募邀約電訪演練（Gemini）')) {
     '嗨，好久不見，我是阿豪！最近好嗎？', '謝謝你今天出來跟我喝咖啡，這家店不錯吧？', '你最近早餐店生意還好嗎？', '我現在在保險業，想約你找一天見面聊聊我的工作。']);
   const phSay = ph.rs.filter(r => r.type === 'candidate').map(r => r.text);
   ok(!phSay.some(P.phoneDrift), `電訪全程維持在電話裡（${phSay.length} 句）`, phSay.join(' / '));
+  // R017：場景鎖不能太敏感——「約你喝杯咖啡」是邀約，對方不該回「我們現在是在講電話吧」（截圖手冊時發現）
+  const inv = await play('call', P.SAMPLES.find(s => s.key === 'mom'), [
+    '喂，好久不見！我是以前的同事阿豪，最近還好嗎？', '我最近換到保險業，想約你喝杯咖啡，跟你分享我現在的工作，聽聽看就好，不適合也完全沒關係。']);
+  const invSay = inv.rs.filter(r => r.type === 'candidate').map(r => r.text);
+  ok(!invSay.some(t => /講電話/.test(t)), '約「之後」喝咖啡被當成邀約，不會被說成「我們在講電話」', invSay.join(' / '));
 
   const st = await play('call', P.SAMPLES.find(s => s.key === 'teacher'), ['喂', '嗯', '那個', '呃', '嗯嗯', '喔', '欸'], { difficulty: 2 });
   ok(st.rs.at(-1).ended && st.fb.outcome.tier === 0, `一直講不清楚 → 對方引導後婉拒（第 ${st.rs.length} 句結束）`);
