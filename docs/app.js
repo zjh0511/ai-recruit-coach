@@ -3,13 +3,13 @@
 // 帳號與訓練紀錄透過 Firebase 同步（和 AI業務教練共用同一個專案，資料放在 /recruit/<uid>）。
 //
 // 四大功能：招募對象痛點分析、招募邀約電訪演練、招募面談技巧演練、問問招募教練。
-import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=10';
-import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=10';
-import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=10';
-import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=10';
-import * as acct from './engine/account.js?v=10';
-import * as own from './engine/owner.js?v=10';
-import { setOwner } from './engine/store.js?v=10';
+import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=11';
+import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=11';
+import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=11';
+import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=11';
+import * as acct from './engine/account.js?v=11';
+import * as own from './engine/owner.js?v=11';
+import { setOwner } from './engine/store.js?v=11';
 
 const $ = s => document.querySelector(s);
 const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
@@ -42,6 +42,10 @@ function show(name) {
   if (name !== 'chat') chatVoiceOff();
   vmode = name === 'chat' ? 'chat' : 'play';
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + name));
+  // 換到新畫面一律從最上面開始。畫面隱藏時設 scrollTop 沒有作用，所以要在顯示之後才設——
+  // 原本各頁在 render 時（還沒顯示）設，第二次練完的回饋頁會停在上一次捲到的位置（R018）。
+  // 演練與教練對話例外：對話紀錄要停在最新一則。
+  if (name !== 'play' && name !== 'chat') { const sc = document.querySelector(`#s-${name} .scroll`); if (sc) sc.scrollTop = 0; }
   if (name === 'history') renderHistory();
   if (name === 'models') renderModels();
   if (name === 'docs') renderDocs();
