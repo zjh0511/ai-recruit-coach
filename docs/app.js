@@ -3,13 +3,14 @@
 // 帳號與訓練紀錄透過 Firebase 同步（和 AI業務教練共用同一個專案，資料放在 /recruit/<uid>）。
 //
 // 四大功能：招募對象痛點分析、招募邀約電訪演練、招募面談技巧演練、問問招募教練。
-import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=11';
-import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=11';
-import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=11';
-import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=11';
-import * as acct from './engine/account.js?v=11';
-import * as own from './engine/owner.js?v=11';
-import { setOwner } from './engine/store.js?v=11';
+import { Voice, supported, voiceInfo, MIC_AFTER_TTS_MS } from './voice.js?v=12';
+import { TtsRotator, nextPacificMidnight, voiceFor, COACH_VOICES } from './engine/tts.js?v=12';
+import { api, providers, restore, onModelEvent, disconnect } from './engine/api.js?v=12';
+import { SAMPLES, MODES, CONTEXTS } from './engine/prompts.js?v=12';
+import * as acct from './engine/account.js?v=12';
+import * as own from './engine/owner.js?v=12';
+import { setOwner } from './engine/store.js?v=12';
+import * as meta from './engine/meta.js?v=12';
 
 const $ = s => document.querySelector(s);
 const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
@@ -19,6 +20,10 @@ const el = (t, c, x) => { const n = document.createElement(t); if (c) n.classNam
 const K = own.KEYS;
 const uid = () => (acct.configured() ? acct.user()?.uid || own.NOBODY : null);
 const my = own.scoped(localStorage, uid);
+
+// 從帶 ?src= 的連結進來（YouTube、QR Code、LINE…）：記下來源，並從網址拿掉（R019，見 engine/meta.js）
+try { const clean = meta.captureSrc(location.href, localStorage); if (clean) history.replaceState(history.state, '', clean); }
+catch { /* 網址解析失敗就不記，不影響使用 */ }
 
 // 不屬於任何帳號的裝置狀態（看過歡迎頁、提示過安裝）
 const SEEN_KEY = own.PREFIX + 'seen';
@@ -1284,13 +1289,45 @@ function renderHistory() {
     b.append(c);
   }
   const clr = el('button', 'link', '清除所有紀錄');
-  clr.onclick = () => { if (confirm('確定要刪除全部訓練紀錄？')) { my.del(K.history); renderHistory(); } };
+  // 原本只刪本機：同步是「取聯集」，下一次同步雲端的紀錄就全部回來了，等於沒刪（R019，AI業務教練 D049 同一個問題）。
+  // 現在連雲端一起清：拉下雲端資料、合併後把紀錄清空、整包寫回去。
+  clr.onclick = async () => {
+    if (!confirm('確定要刪除全部訓練紀錄？雲端備份也會一起刪除。')) return;
+    my.del(K.history);
+    if (acct.configured() && acct.user()) {
+      try {
+        const who = acct.user().uid, remote = await acct.pull();
+        if (!remote) throw new Error('目前連不上雲端，請有網路時再清一次');
+        if (acct.user()?.uid === who) await acct.push({ ...acct.merge(bundle(), remote), history: [] }, who);
+      } catch (e) { toast('這台裝置的紀錄已清除，但雲端還沒清掉：' + e.message, 6000); }
+    }
+    renderHistory();
+  };
   b.append(clr);
 }
 
 // ── 帳號與雲端同步 ──────────────────────────────────────────
 // 同步只涵蓋「訓練紀錄」與「偏好設定」；API 金鑰永遠留在本機。
 let syncBadge = null, syncing = false, syncTimer;
+
+// 記下「這個人用了這台裝置」與他第一次是從哪條連結來的（R019，欄位與隱私考量見 engine/meta.js）。
+// 要在同步之後呼叫：來源只歸給「還沒有任何訓練紀錄的新帳號」——
+// 已經在用的人好奇點了推廣連結，不能被算成那個管道帶來的新用戶；換新手機的舊用戶要等雲端紀錄拉下來才看得出來。
+function recordUse() {
+  if (!acct.user()) return;
+  let cur = null;
+  try { cur = JSON.parse(my.get(meta.META_KEY) || 'null'); } catch { /* 壞資料當沒有 */ }
+  const records = history_().length;
+  const pending = meta.pendingSrc(localStorage);
+  const { meta: next, changed } = meta.touch(cur, {
+    device: meta.deviceOf(navigator.userAgent, navigator.platform, navigator.maxTouchPoints),
+    home: standalone(),
+    src: records ? null : pending,
+  });
+  // 這台裝置記下的來源只用一次，免得之後換別人在這台裝置登入時被算到他頭上
+  if (pending) localStorage.removeItem(meta.SRC_KEY);
+  if (changed) { my.set(meta.META_KEY, JSON.stringify(next)); syncSoon(); }
+}
 
 // 登入、登出、換人之後，把記憶體裡屬於前一位的東西換掉
 function switchOwner() {
@@ -1302,8 +1339,11 @@ function switchOwner() {
 
 function bundle() {
   const p = prefs();
+  let m = {};
+  try { m = JSON.parse(my.get(meta.META_KEY) || 'null') || {}; } catch { /* 壞資料當空的 */ }
   return {
     history: history_(),
+    meta: m,
     prefs: {
       diff: p.diff || '', ctx: p.ctx || '', coach: p.coach || '',
       provider: localStorage.getItem(PROV_KEY) || '',
@@ -1315,6 +1355,7 @@ function bundle() {
 
 function applyBundle(b) {
   try { my.set(K.history, JSON.stringify((b.history || []).slice(0, 50))); } catch { /* 容量滿 */ }
+  if (b.meta) my.set(meta.META_KEY, JSON.stringify(b.meta));
   const p = b.prefs || {};
   // 模型指定只在「服務商相同」時才套用
   if (p.models && p.provider && p.provider === localStorage.getItem(PROV_KEY)) my.set(K.models, p.models);
@@ -1389,6 +1430,7 @@ async function afterAuth() {
   switchOwner();
   updateWho();
   await syncNow(true);          // 先把雲端資料拉下來，再進金鑰流程（模型指定才會生效）
+  recordUse();                  // 雲端紀錄拉下來後才判斷得出是不是新用戶
   await initLogin();
   updateAccount(); syncInstallBtn(); handleShortcut();
 }
@@ -1652,7 +1694,7 @@ async function boot() {
     initAuth();
     return show('auth');
   }
-  if (acct.user()) { updateWho(); syncNow(); }
+  if (acct.user()) { updateWho(); syncNow().then(recordUse); }
   await initLogin();
   updateAccount(); syncInstallBtn(); handleShortcut();
 }

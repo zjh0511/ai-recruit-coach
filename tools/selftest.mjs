@@ -63,6 +63,21 @@ if (section(1, '規則層（不用金鑰）')) {
   ok(m.history.map(r => r.at).join() === '3,2,1', '訓練紀錄以時間取聯集、新的在前', m.history.map(r => r.at).join());
   ok(m.prefs.diff === '2', '偏好設定以較新的為準');
 
+  // ── 來源與裝置統計（R019）──
+  {
+    const M = await import('../docs/engine/meta.js');
+    ok(M.SRC_KEY.startsWith('recruit.') && M.META_KEY.startsWith('recruit.'),
+      '來源與統計的鍵名以 recruit. 開頭（和 AI業務教練的 aicoach.src 分開，兩個 App 同網域）');
+    const st = new Map(), s = { getItem: k => st.get(k) ?? null, setItem: (k, v) => st.set(k, String(v)), removeItem: k => st.delete(k) };
+    ok(M.captureSrc('https://x.io/ai-recruit-coach/?src=yt-r1&go=call', s) === '/ai-recruit-coach/?go=call'
+      && M.pendingSrc(s)?.src === 'yt-r1', '帶來源進來：記在這台裝置、從網址拿掉，其他參數保留');
+    const r = M.touch(null, { device: 'android-phone', home: true, src: M.pendingSrc(s) });
+    ok(r.changed && r.meta.src === 'yt-r1' && r.meta.devices['android-phone'].home, '新用戶：記下來源、裝置、是否加到主畫面');
+    ok(M.deviceOf('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 'MacIntel', 5) === 'ipad', 'iPad 自稱 Mac：靠觸控點數認出來');
+    const mm = acct.merge({ history: [], meta: r.meta }, { history: [{ at: 1 }] });
+    ok(mm.meta?.src === 'yt-r1' && mm.history.length === 1, '同步合併帶著統計（雲端是整包覆寫，漏掉會被清掉）');
+  }
+
   // ── 安全規則：兩個 App 共用一份 ──
   const rules = read('database.rules.json');
   ok(/"users"\s*:\s*\{\s*"\$uid"\s*:\s*\{\s*"\.read"\s*:\s*"\$uid === auth\.uid",\s*"\.write"\s*:\s*"\$uid === auth\.uid"/.test(rules),

@@ -20,6 +20,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { DEVICE_NAMES } from '../docs/engine/meta.js';
 
 const PROJECT = 'ai-sales-coach-4b4cb';
 const args = process.argv.slice(2);
@@ -96,6 +97,7 @@ const summary = [[
   '演練次數', '最後演練', '平均星等', ...Object.values(NAMES),
   '成功約到下一步', '願意考照', '合規提醒次數',
   `${MODE.call}次數`, `${MODE.meet}次數`, `${MODE.system}次數`, '目前難度',
+  '首次來源', '使用過的裝置', '加到主畫面',      // R019
 ]];
 const detail = [[
   '姓名', 'E-mail', '演練時間', '模式', '招募對象', '結果',
@@ -105,6 +107,7 @@ const detail = [[
 const rows = users.map(a => {
   const h = cloud[a.localId]?.history || [];
   const prefs = cloud[a.localId]?.prefs || {};
+  const devs = Object.entries(cloud[a.localId]?.meta?.devices || {});
   const per = {};
   for (const k of Object.keys(NAMES)) per[k] = avg(h.map(x => x.scores?.[k]).filter(n => typeof n === 'number'));
   const all = h.flatMap(x => Object.values(x.scores || {})).filter(n => typeof n === 'number');
@@ -118,6 +121,8 @@ const rows = users.map(a => {
     h.filter(x => x.tier > 0).length, h.filter(x => x.tier === 2).length,
     h.reduce((s, x) => s + (x.violations || 0), 0),
     count('call'), count('meet'), count('system'), DIFF[prefs.diff] || '',
+    cloud[a.localId]?.meta?.src || '未標記（舊用戶或直接開啟）', devs.map(([k]) => DEVICE_NAMES[k] || k).join('、'),
+    devs.filter(([, v]) => v?.home).map(([k]) => DEVICE_NAMES[k] || k).join('、'),
   ]);
 
   for (const x of h) {

@@ -5,7 +5,8 @@
 //
 // 同步範圍是刻意收窄的（使用者決定）：只有訓練紀錄與偏好設定。
 // **API 金鑰與上傳的教材／條款一律不上雲端**，只留在這台裝置。
-import { FB } from '../firebase-config.js?v=11';
+import { FB } from '../firebase-config.js?v=12';
+import { mergeMeta } from './meta.js?v=12';
 
 const IDP = 'https://identitytoolkit.googleapis.com/v1/accounts:';
 const TOKEN = 'https://securetoken.googleapis.com/v1/token';
@@ -215,6 +216,8 @@ export async function push(data, expectUid) {
 // - 訓練紀錄用 at（時間戳）當識別碼取「聯集」。用覆蓋的話，
 //   在手機練完、電腦一開就會把手機那幾筆整批蓋掉。
 // - 偏好設定比 updatedAt，晚的贏。同一個人不會真的同時在兩台裝置改設定。
+// - 來源與裝置統計（meta，R019）見 meta.js 的 mergeMeta。一定要放進合併結果：push 是整包 PUT，
+//   沒放進來的欄位會被雲端整個蓋掉。
 export function merge(local, remote) {
   const byAt = new Map();
   for (const r of [...(remote?.history || []), ...(local?.history || [])]) if (r?.at) byAt.set(r.at, r);
@@ -222,5 +225,6 @@ export function merge(local, remote) {
   return {
     history: [...byAt.values()].sort((a, b) => b.at - a.at).slice(0, 100),
     prefs: (lp.updatedAt || 0) >= (rp.updatedAt || 0) ? lp : rp,
+    meta: mergeMeta(local?.meta, remote?.meta),
   };
 }
